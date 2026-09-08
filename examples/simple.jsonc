@@ -1,0 +1,23 @@
+// The smallest useful job: one listing, everything inferred.
+//
+//   uparse examples/simple.jsonc
+{
+  "name": "books — everything automatic",
+
+  "sources": {
+    "type": "url",
+    "url": "https://books.toscrape.com/"
+  },
+
+  // No JavaScript on this site, so skip Chromium and go four times faster.
+  "acquirer": "http",
+
+  "pagination": {
+    "max_pages": 3
+  },
+
+  "output": {
+    "format": "csv",
+    "path": "./books.csv"
+  }
+}

@@ -1,0 +1,59 @@
+// A product job with the escape hatch in use: two fields pinned, the rest inferred,
+// and each listing row enriched from the page behind it.
+//
+//   uparse examples/products.jsonc
+{
+  "name": "books — pinned fields, detail pages followed",
+
+  "sources": {
+    "type": "url",
+    "url": "https://books.toscrape.com/"
+  },
+
+  "acquirer": "http",
+
+  "extraction": {
+    // Naming fields restricts the output to exactly these columns.
+    "fields": {
+      // This listing clips the visible title and keeps the full one in title=,
+      // so read the attribute rather than the text.
+      "title": { "selector": "h3 a", "attribute": "title" },
+
+      // A bare selector yields text — except for URL fields, which yield the href.
+      "url": { "selector": "h3 a" },
+
+      // Inferred, and correct here — price, stock and the cover image.
+      "price": "auto",
+      "availability": "auto",
+      "image": "auto",
+
+      // Only on the detail page, from its two-column specification table.
+      "sku": "auto",
+      "description": "auto"
+    }
+  },
+
+  "follow": {
+    "enabled": true,
+    "field": "url",
+    "max_pages": 60
+  },
+
+  "pagination": { "max_pages": 3 },
+
+  "dedupe": {
+    "keys": ["url"]
+  },
+
+  "politeness": {
+    "delay_s": 0.2,
+    "per_host": 4
+  },
+
+  "concurrency": 4,
+
+  "output": {
+    "format": "jsonl",
+    "path": "./products.jsonl"
+  }
+}

@@ -1,0 +1,39 @@
+// An article feed. Nothing is pinned: the class names here are conventional enough
+// that inference handles them, and dates are normalized to ISO-8601 automatically.
+//
+//   uparse examples/news.jsonc
+{
+  "name": "python insider — article feed",
+
+  "sources": {
+    "type": "urls",
+    "urls": [
+      "https://blog.python.org/",
+      "https://realpython.com/"
+    ]
+  },
+
+  "acquirer": "http",
+
+  "extraction": {
+    "fields": {
+      "title": "auto",
+      "url": "auto",
+      "date": "auto",
+      "description": "auto"
+    },
+    // A feed page has more than a handful of entries; this rejects small nav clusters.
+    "min_records": 4
+  },
+
+  "pagination": { "enabled": false },
+
+  // Two unrelated hosts, so they can run at the same time without crowding either.
+  "concurrency": 2,
+  "politeness": { "per_host": 1, "delay_s": 0.5 },
+
+  "output": {
+    "format": "json",
+    "path": "./news.json"
+  }
+}
