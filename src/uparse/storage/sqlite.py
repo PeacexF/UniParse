@@ -123,9 +123,31 @@ class Store:
             )
         )
 
+    def job_config(self, job_id: int) -> dict[str, Any]:
+        row = self.conn.execute("SELECT config_json FROM jobs WHERE id=?", (job_id,)).fetchone()
+        if row is None:
+            return {}
+        loaded = json.loads(row["config_json"])
+        return loaded if isinstance(loaded, dict) else {}
+
     def latest_job_id(self) -> int | None:
         row = self.conn.execute("SELECT id FROM jobs ORDER BY id DESC LIMIT 1").fetchone()
         return None if row is None else int(row["id"])
+
+    def mark_retried(self, job_id: int) -> None:
+        """Hand failures over to the retry job so `retry` is not an infinite loop."""
+        self.conn.execute(
+            "UPDATE sources SET status='retried' WHERE job_id=? AND status IN ('failed','blocked')",
+            (job_id,),
+        )
+
+    def latest_job_with_failures(self) -> int | None:
+        """Retrying twice must not target the previous retry run, which has no failures."""
+        row = self.conn.execute(
+            "SELECT job_id FROM sources WHERE status IN ('failed','blocked')"
+            " ORDER BY job_id DESC LIMIT 1"
+        ).fetchone()
+        return None if row is None else int(row["job_id"])
 
     # ------------------------------------------------------------- pages
 

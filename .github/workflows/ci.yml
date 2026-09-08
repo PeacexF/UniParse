@@ -2,8 +2,7 @@ name: CI [uniparse]
 
 on:
   push:
-    branches: [main]
-  pull_request:
+    branches: ['**']
   workflow_dispatch:
 
 concurrency:
@@ -46,24 +45,37 @@ jobs:
   browser:
     name: browser worker (build · typecheck)
     runs-on: ubuntu-latest
-    if: hashFiles('browser/package.json') != ''
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check for browser worker
+        id: browser
+        shell: bash
+        run: |
+          if [[ -f browser/package.json ]]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/setup-node@v4
+        if: steps.browser.outputs.present == 'true'
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: browser/package-lock.json
 
       - name: Install worker deps
+        if: steps.browser.outputs.present == 'true'
         working-directory: browser
         run: npm ci || npm install
 
       - name: Typecheck
+        if: steps.browser.outputs.present == 'true'
         working-directory: browser
         run: npm run typecheck
 
       - name: Build
+        if: steps.browser.outputs.present == 'true'
         working-directory: browser
         run: npm run build
