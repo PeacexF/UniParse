@@ -247,6 +247,31 @@ def _confidence(position: int, headers: list[str], table_confidence: float) -> f
     return round(min(base + (0.05 if position == 0 else 0.0), table_confidence + 0.15), 4)
 
 
+def property_pairs(root: HtmlElement, *, min_rows: int = 2) -> dict[str, str]:
+    """Two-column label/value tables, as found on most detail pages.
+
+    "UPC | a897fe39b1053632" is not two records, it is one property of the thing the page
+    is about, so these rows fold into the page record instead of becoming rows of their own.
+    """
+    out: dict[str, str] = {}
+    for table in root.iter("table"):
+        grid = _grid(table)
+        body = grid[len(_header_rows(grid)) :]
+        if len(body) < min_rows or any(len([c for c in row if c is not None]) != 2 for row in body):
+            continue
+        for row in body:
+            cells = [c for c in row if c is not None]
+            label = node_text(cells[0], limit=120)
+            value = node_text(cells[1], limit=2000)
+            if not label or not value:
+                continue
+            tokens = tokens_of(label)
+            name = field_for_token("_".join(tokens)) or "_".join(tokens)[:48]
+            if name:
+                out.setdefault(name, value)
+    return out
+
+
 def summarize(root: HtmlElement) -> list[tuple[str, int, int]]:
     out: list[tuple[str, int, int]] = []
     for table in root.iter("table"):

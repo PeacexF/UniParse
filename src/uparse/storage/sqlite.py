@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Iterable, Iterator
+import threading
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager, suppress
 from datetime import UTC, datetime
 from importlib import resources
 from pathlib import Path
-from typing import Any, Self
+from typing import Any, Concatenate, Self
 
 from uparse.core.errors import ErrorCode, StorageError
 from uparse.core.models import JobStats, Record
@@ -23,10 +24,33 @@ def _dumps(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, default=str)
 
 
+def locked[**P, R](
+    method: Callable[Concatenate[Store, P], R],
+) -> Callable[Concatenate[Store, P], R]:
+    """Serialize one statement (or one transaction) against the shared connection."""
+
+    def guarded(self: Store, /, *args: P.args, **kwargs: P.kwargs) -> R:
+        with self.lock:
+            return method(self, *args, **kwargs)
+
+    # Not functools.wraps: its return type would no longer match the signature above,
+    # and `cast` cannot help because annotations here are strings but cast is evaluated.
+    guarded.__name__ = method.__name__
+    guarded.__qualname__ = getattr(method, "__qualname__", method.__name__)
+    guarded.__doc__ = method.__doc__
+    return guarded
+
+
 class Store:
-    """Job persistence. Everything the pipeline writes goes through here."""
+    """Job persistence. Everything the pipeline writes goes through here.
+
+    One connection is shared across worker threads, so every statement runs under
+    `self.lock`: SQLite tolerates the sharing, but interleaved BEGIN/COMMIT from two
+    threads would not be two transactions, it would be one confused one.
+    """
 
     def __init__(self, path: str | Path | None = None) -> None:
+        self.lock = threading.RLock()
         self.path = Path(path) if path is not None else None
         target = ":memory:" if self.path is None else str(self.path)
         if self.path is not None:
@@ -60,17 +84,19 @@ class Store:
 
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
-        cur = self.conn.cursor()
-        cur.execute("BEGIN")
-        try:
-            yield self.conn
-        except BaseException:
-            cur.execute("ROLLBACK")
-            raise
-        cur.execute("COMMIT")
+        with self.lock:
+            cur = self.conn.cursor()
+            cur.execute("BEGIN")
+            try:
+                yield self.conn
+            except BaseException:
+                cur.execute("ROLLBACK")
+                raise
+            cur.execute("COMMIT")
 
     # -------------------------------------------------------------- jobs
 
+    @locked
     def start_job(self, config: dict[str, Any], name: str | None = None) -> int:
         cur = self.conn.execute(
             "INSERT INTO jobs(name, created_at, status, config_json) VALUES(?,?,?,?)",
@@ -79,6 +105,7 @@ class Store:
         self.job_id = int(cur.lastrowid or 0)
         return self.job_id
 
+    @locked
     def finish_job(self, stats: JobStats, status: str = "completed") -> None:
         self.conn.execute(
             "UPDATE jobs SET completed_at=?, status=?, stats_json=? WHERE id=?",
@@ -92,16 +119,19 @@ class Store:
 
     # ----------------------------------------------------------- sources
 
+    @locked
     def add_source(self, url: str, status: str = "pending") -> int:
         cur = self.conn.execute(
             "INSERT INTO sources(job_id, url, status) VALUES(?,?,?)", (self._job(), url, status)
         )
         return int(cur.lastrowid or 0)
 
+    @locked
     def add_sources(self, urls: Iterable[str]) -> list[int]:
         with self.transaction():
             return [self.add_source(u) for u in urls]
 
+    @locked
     def update_source(
         self, source_id: int, status: str, *, error: str | None = None, attempts: int | None = None
     ) -> None:
@@ -115,6 +145,7 @@ class Store:
                 (status, error, attempts, source_id),
             )
 
+    @locked
     def failed_sources(self, job_id: int | None = None) -> list[sqlite3.Row]:
         return list(
             self.conn.execute(
@@ -123,6 +154,7 @@ class Store:
             )
         )
 
+    @locked
     def job_config(self, job_id: int) -> dict[str, Any]:
         row = self.conn.execute("SELECT config_json FROM jobs WHERE id=?", (job_id,)).fetchone()
         if row is None:
@@ -130,10 +162,12 @@ class Store:
         loaded = json.loads(row["config_json"])
         return loaded if isinstance(loaded, dict) else {}
 
+    @locked
     def latest_job_id(self) -> int | None:
         row = self.conn.execute("SELECT id FROM jobs ORDER BY id DESC LIMIT 1").fetchone()
         return None if row is None else int(row["id"])
 
+    @locked
     def mark_retried(self, job_id: int) -> None:
         """Hand failures over to the retry job so `retry` is not an infinite loop."""
         self.conn.execute(
@@ -141,6 +175,7 @@ class Store:
             (job_id,),
         )
 
+    @locked
     def latest_job_with_failures(self) -> int | None:
         """Retrying twice must not target the previous retry run, which has no failures."""
         row = self.conn.execute(
@@ -151,6 +186,7 @@ class Store:
 
     # ------------------------------------------------------------- pages
 
+    @locked
     def add_page(
         self,
         source_id: int,
@@ -184,6 +220,7 @@ class Store:
         )
         return int(cur.lastrowid or 0)
 
+    @locked
     def seen_content_hash(self, source_id: int, content_hash: str) -> bool:
         row = self.conn.execute(
             "SELECT 1 FROM pages WHERE source_id=? AND content_hash=? LIMIT 1",
@@ -193,6 +230,7 @@ class Store:
 
     # ----------------------------------------------------------- records
 
+    @locked
     def add_records(
         self, page_id: int, records: Iterable[Record], *, keys: list[str] | None = None
     ) -> int:
@@ -238,7 +276,7 @@ class Store:
             "SELECT r.data_json FROM records r"
             " JOIN pages p ON p.id = r.page_id"
             " JOIN sources s ON s.id = p.source_id"
-            " WHERE s.job_id = ? ORDER BY r.id",
+            " WHERE s.job_id = ? ORDER BY s.id, p.id, r.record_index, r.id",
             (jid,),
         )
         while rows := cur.fetchmany(batch):
@@ -252,7 +290,7 @@ class Store:
             " JOIN pages p ON p.id = r.page_id"
             " JOIN sources s ON s.id = p.source_id"
             " LEFT JOIN fields f ON f.record_id = r.id"
-            " WHERE s.job_id = ? ORDER BY r.id, f.id",
+            " WHERE s.job_id = ? ORDER BY s.id, p.id, r.record_index, r.id, f.id",
             (jid,),
         )
         current_id: int | None = None
@@ -267,6 +305,7 @@ class Store:
         if current_id is not None:
             yield current
 
+    @locked
     def count_records(self, job_id: int | None = None) -> int:
         jid = job_id if job_id is not None else self._job()
         row = self.conn.execute(
@@ -278,6 +317,7 @@ class Store:
 
     # ------------------------------------------------------------ errors
 
+    @locked
     def add_error(
         self,
         code: ErrorCode | str,
@@ -295,6 +335,7 @@ class Store:
 
     # ------------------------------------------------------------- misc
 
+    @locked
     def close(self) -> None:
         with suppress(sqlite3.Error):
             self.conn.commit()

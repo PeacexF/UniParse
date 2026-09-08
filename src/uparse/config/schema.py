@@ -178,7 +178,19 @@ class OutputConfig(Base):
 class PolitenessConfig(Base):
     delay_s: float = Field(default=0.0, ge=0.0, le=60.0)
     respect_robots: bool = True
+    obey_crawl_delay: bool = True
+    per_host: int = Field(default=2, ge=1, le=32)
     user_agent_note: str | None = None
+
+
+class FollowConfig(Base):
+    """Visit the page each record links to and merge what it says back into the record."""
+
+    enabled: bool = False
+    field: str = "url"
+    max_pages: int = Field(default=200, ge=1, le=100_000)
+    prefer: Literal["detail", "listing"] = "detail"
+    same_host: bool = True
 
 
 class Config(Base):
@@ -190,6 +202,10 @@ class Config(Base):
     retry: RetryConfig = Field(default_factory=RetryConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)
     politeness: PolitenessConfig = Field(default_factory=PolitenessConfig)
+    follow: FollowConfig = Field(default_factory=FollowConfig)
+    # Sources processed at once. Per-host limits still apply, so this is a job-wide
+    # budget rather than permission to point every thread at one site.
+    concurrency: int = Field(default=4, ge=1, le=64)
     acquirer: AcquirerName = "auto"
     db: Path | None = None
     name: str | None = None

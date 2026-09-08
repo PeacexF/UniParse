@@ -37,13 +37,21 @@ from uparse.extraction.htmlutil import (
 )
 from uparse.extraction.vocabulary import FIELD_TYPES
 from uparse.processing.normalize import coerce, normalize_enum
-from uparse.processing.scoring import apply_consistency, base_signal, best_per_field, score
+from uparse.processing.scoring import (
+    SOURCE_BASE,
+    apply_consistency,
+    base_signal,
+    best_per_field,
+    score,
+)
 
 Strategy = str
 
 # Structured data is machine-readable and authored by the site; only a configured
 # collection (confidence 1.0) outranks it.
 STRUCTURED_QUALITY = 0.95
+# A whole page has far more nodes than one record, so the per-record cap is lifted here.
+PAGE_NODE_LIMIT = 4_000
 
 
 @dataclass(slots=True)
@@ -239,6 +247,76 @@ def _single_record(
         score(c)
     record = _record_from_candidates(cands, 0, page, "page")
     return [record] if len(record.fields) > 1 else []
+
+
+def extract_one(page: PageModel, config: ExtractionConfig | None = None) -> Record | None:
+    """Everything the page says about the single thing it is about.
+
+    Detail pages are not collections: a product page's specification table is a list of
+    that product's properties, not a list of products, so collection and table strategies
+    are skipped entirely here.
+    """
+    cfg = config or ExtractionConfig()
+    root = parse(page.html, page.base_url)
+    hydrate(page, root)
+    blocks = sd.extract_all(root, page.base_url) if cfg.include_structured_data else []
+
+    records = _single_record(blocks, page, cfg)
+    record = records[0] if records else Record(index=0, page_url=page.base_url, collection="page")
+    record.node = root
+
+    if cfg.include_tables:
+        for name, value in tbl.property_pairs(root).items():
+            if name not in record.fields:
+                target = FIELD_TYPES.get(name, ValueType.STRING)
+                coerced, actual = coerce(value, target, base_url=page.base_url)
+                if coerced not in (None, ""):
+                    record.set(
+                        FieldValue(
+                            name=name,
+                            value=coerced,
+                            raw=value,
+                            type=actual,
+                            confidence=SOURCE_BASE[Source.TABLE],
+                            source=Source.TABLE,
+                            selector=f"table tr:contains({name})",
+                            signals=[base_signal(Source.TABLE, "property table")],
+                        )
+                    )
+
+    # The page's own markup, not just its structured data: a detail page names most of
+    # what it knows in classes and headings exactly as a listing card does.
+    scope = _main_content(root)
+    for name, cand in best_per_field(
+        fld.from_node(scope, page.base_url, limit=PAGE_NODE_LIMIT)
+    ).items():
+        if name not in record.fields:
+            record.set(
+                FieldValue(
+                    name=name,
+                    value=cand.value,
+                    raw=cand.value,
+                    type=FIELD_TYPES.get(name, ValueType.STRING),
+                    confidence=cand.confidence,
+                    source=cand.source,
+                    selector=cand.selector,
+                    signals=cand.signals,
+                )
+            )
+
+    _apply_config_fields([record], root, page, cfg)
+    _finalize([record], page, cfg)
+    return record if record.fields else None
+
+
+def _main_content(root: HtmlElement) -> HtmlElement:
+    """Narrow to the part of the page that is about the thing, skipping nav and footer."""
+    for selector in ("main", "article", "[role=main]", "#content", "#main"):
+        found = select(root, selector)
+        if found:
+            return found[0]
+    body = root.find("body")
+    return body if body is not None else root
 
 
 # --------------------------------------------------------- config overrides

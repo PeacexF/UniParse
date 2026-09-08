@@ -13,6 +13,7 @@ class ErrorCode(StrEnum):
     BROWSER_ERROR = "BROWSER_ERROR"
     WORKER_ERROR = "WORKER_ERROR"
     BLOCKED = "BLOCKED"
+    ROBOTS_DISALLOWED = "ROBOTS_DISALLOWED"
 
     EXTRACTION_ERROR = "EXTRACTION_ERROR"
     NORMALIZATION_ERROR = "NORMALIZATION_ERROR"
@@ -39,6 +40,7 @@ TERMINAL: frozenset[ErrorCode] = frozenset(
         ErrorCode.CONFIG_ERROR,
         ErrorCode.SOURCE_ERROR,
         ErrorCode.BLOCKED,
+        ErrorCode.ROBOTS_DISALLOWED,
         ErrorCode.VALIDATION_ERROR,
     }
 )
@@ -99,6 +101,12 @@ class WorkerError(AcquisitionError):
 # Detected only. UniParse never solves or bypasses challenges.
 class BlockedError(AcquisitionError):
     code = ErrorCode.BLOCKED
+
+
+class RobotsDisallowedError(AcquisitionError):
+    """The site's own robots.txt says not to. Not retryable, and not worked around."""
+
+    code = ErrorCode.ROBOTS_DISALLOWED
 
 
 class ExtractionError(UparseError):

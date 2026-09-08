@@ -78,6 +78,22 @@ function inspect(value: unknown): string {
  * stdout is the protocol channel. Redirect every other writer — console, Playwright,
  * a stray dependency — to stderr so a single stray print cannot desynchronize the stream.
  */
+/**
+ * Leave the moment our output has nowhere to go.
+ *
+ * When the parent dies both pipes break. Writing to a broken pipe raises EPIPE, and since
+ * diagnostics themselves go to stderr, the error handler's own log raises EPIPE again —
+ * a loop that pins a core until someone notices the fan. There is nothing to report to
+ * once the pipes are gone, so the only correct response is to exit.
+ */
+export function exitOnBrokenPipe(): void {
+  for (const stream of [process.stdout, process.stderr]) {
+    stream.on('error', (error: NodeJS.ErrnoException) => {
+      if (error.code === 'EPIPE' || error.code === 'ERR_STREAM_DESTROYED') process.exit(0);
+    });
+  }
+}
+
 export function guardStdout(): void {
   process.stdout.write = ((chunk: string | Uint8Array, ...rest: unknown[]) =>
     (process.stderr.write as (...args: never[]) => boolean)(

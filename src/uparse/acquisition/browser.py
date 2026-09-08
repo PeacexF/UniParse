@@ -7,6 +7,7 @@ import subprocess
 import threading
 import time
 from contextlib import suppress
+from dataclasses import dataclass
 from itertools import count
 from pathlib import Path
 from typing import Any
@@ -31,16 +32,34 @@ WORKER_ENTRY = WORKER_DIR / "dist" / "main.js"
 STARTUP_TIMEOUT_S = 30.0
 
 
+@dataclass(slots=True)
+class _Pending:
+    """One in-flight request, waiting for the reader thread to hand back its answer."""
+
+    event: threading.Event
+    response: Response | None = None
+    failure: Exception | None = None
+
+
 class WorkerProcess:
-    """Owns the node child process and the JSONL request/response correlation."""
+    """Owns the node child process and the JSONL request/response correlation.
+
+    Requests are correlated by id rather than serialized, so several pages can be in
+    flight at once — the worker already pools that many pages, and holding a lock across
+    the round trip would have made `browser.concurrency` meaningless.
+    """
 
     def __init__(self, config: BrowserConfig) -> None:
         self.config = config
         self._ids = count(1)
-        self._lock = threading.Lock()
+        self._write_lock = threading.Lock()
+        self._pending_lock = threading.Lock()
+        self._pending: dict[int, _Pending] = {}
         self._proc = self._spawn()
         self._drain = threading.Thread(target=self._pump_stderr, daemon=True)
         self._drain.start()
+        self._reader = threading.Thread(target=self._pump_stdout, daemon=True)
+        self._reader.start()
         self._handshake()
 
     def _spawn(self) -> subprocess.Popen[str]:
@@ -117,45 +136,65 @@ class WorkerProcess:
     ) -> dict[str, Any]:
         request = Request(id=next(self._ids), method=method, params=params)
         budget = timeout if timeout is not None else self.config.timeout / 1000 + 10
-        with self._lock:
+        slot = _Pending(event=threading.Event())
+        with self._pending_lock:
+            self._pending[request.id] = slot
+        try:
             self._write(request)
-            return self._read(request, budget)
+            if not slot.event.wait(budget):
+                raise NavigationTimeoutError(
+                    f"worker did not answer {request.method} in {budget:.0f}s"
+                )
+            if slot.failure is not None:
+                raise slot.failure
+            response = slot.response
+            if response is None:  # pragma: no cover - event set implies one of the two
+                raise WorkerError(f"no answer for {request.method}")
+            if not response.ok:
+                raise _worker_error(response)
+            return response.data
+        finally:
+            with self._pending_lock:
+                self._pending.pop(request.id, None)
 
     def _write(self, request: Request) -> None:
         if self._proc.stdin is None or self._proc.poll() is not None:
             raise WorkerError("browser worker is not running")
         try:
-            self._proc.stdin.write(request.encode() + "\n")
-            self._proc.stdin.flush()
+            with self._write_lock:
+                self._proc.stdin.write(request.encode() + "\n")
+                self._proc.stdin.flush()
         except (BrokenPipeError, ValueError) as exc:
             raise WorkerError(f"browser worker closed the pipe: {exc}") from exc
 
-    def _read(self, request: Request, budget: float) -> dict[str, Any]:
+    def _pump_stdout(self) -> None:
         stream = self._proc.stdout
         if stream is None:
-            raise WorkerError("browser worker has no stdout")
-        deadline = time.monotonic() + budget
-        while True:
-            if time.monotonic() > deadline:
-                raise NavigationTimeoutError(
-                    f"worker did not answer {request.method} in {budget:.0f}s"
-                )
-            line = stream.readline()
-            if not line:
-                raise WorkerError(f"browser worker exited (code {self._proc.poll()})")
-            line = line.strip()
-            if not line:
+            return
+        for line in stream:
+            text = line.strip()
+            if not text:
                 continue
             try:
-                response = Response.decode(line)
+                response = Response.decode(text)
             except json.JSONDecodeError:
-                log.debug("non-protocol line on stdout: %s", line[:200])
+                log.debug("non-protocol line on stdout: %s", text[:200])
                 continue
-            if response.id != request.id:
+            with self._pending_lock:
+                slot = self._pending.get(response.id)
+            if slot is None:
+                log.debug("answer for an abandoned request: id=%s", response.id)
                 continue
-            if not response.ok:
-                raise _worker_error(response)
-            return response.data
+            slot.response = response
+            slot.event.set()
+        self._fail_pending(WorkerError(f"browser worker exited (code {self._proc.poll()})"))
+
+    def _fail_pending(self, error: Exception) -> None:
+        with self._pending_lock:
+            waiting = list(self._pending.values())
+        for slot in waiting:
+            slot.failure = error
+            slot.event.set()
 
     def close(self) -> None:
         if self._proc.poll() is not None:
@@ -189,12 +228,22 @@ class BrowserAcquirer:
         self.config = config
         self._worker = worker
         self._owned = worker is None
+        self._spawn_lock = threading.Lock()
 
     @property
     def worker(self) -> WorkerProcess:
-        if self._worker is None:
-            self._worker = WorkerProcess(self.config.browser)
-        return self._worker
+        """One worker per acquirer, however many threads ask for it at once.
+
+        Without the lock every thread that raced past the None check spawned its own node
+        + Chromium; only the last assignment survived, so the rest were unreachable, never
+        closed, and outlived the run burning CPU.
+        """
+        if self._worker is not None:
+            return self._worker
+        with self._spawn_lock:
+            if self._worker is None:
+                self._worker = WorkerProcess(self.config.browser)
+            return self._worker
 
     def fetch(self, url: str, *, depth: int = 0) -> PageModel:
         started = time.perf_counter()

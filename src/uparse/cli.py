@@ -78,7 +78,15 @@ scrape_options = _stack(
         help="JSONC job configuration.",
     ),
     click.option("--max-pages", type=int, help="Pagination limit per source."),
-    click.option("--concurrency", type=int, help="Browser concurrency."),
+    click.option("-j", "--concurrency", type=int, help="Sources to process at once."),
+    click.option("--per-host", type=int, help="Concurrent requests allowed per host."),
+    click.option(
+        "--follow",
+        is_flag=True,
+        help="Visit the page each record links to and merge its fields in.",
+    ),
+    click.option("--follow-field", help="Record field holding the link to follow (default: url)."),
+    click.option("--no-robots", is_flag=True, help="Do not fetch or honour robots.txt."),
     click.option(
         "--no-browser", is_flag=True, help="Use plain HTTP instead of Chromium (no JavaScript)."
     ),
@@ -241,6 +249,8 @@ def _summary(stats: JobStats, db_path: Path | None) -> None:
         table.add_row("Blocked", f"[warn]{stats.pages_blocked}[/warn]")
     duplicates = f" ({stats.duplicates} duplicates dropped)" if stats.duplicates else ""
     table.add_row("Records", f"{stats.records}{duplicates}")
+    if stats.followed:
+        table.add_row("Followed", f"{stats.followed} detail pages")
     if stats.retries:
         table.add_row("Retries", str(stats.retries))
     table.add_row("Duration", _duration(stats.duration_s))
@@ -365,7 +375,17 @@ def _apply_overrides(config: Config, options: dict[str, Any]) -> Config:
     if options.get("no_pagination"):
         overrides.setdefault("pagination", {})["enabled"] = False
     if options.get("concurrency"):
+        overrides["concurrency"] = options["concurrency"]
         overrides.setdefault("browser", {})["concurrency"] = options["concurrency"]
+    if options.get("per_host"):
+        overrides.setdefault("politeness", {})["per_host"] = options["per_host"]
+    if options.get("follow") or options.get("follow_field"):
+        follow: dict[str, Any] = {"enabled": True}
+        if options.get("follow_field"):
+            follow["field"] = options["follow_field"]
+        overrides["follow"] = follow
+    if options.get("no_robots"):
+        overrides.setdefault("politeness", {})["respect_robots"] = False
     if options.get("no_browser"):
         overrides.setdefault("browser", {})["enabled"] = False
         overrides["acquirer"] = "http"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import threading
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 
@@ -16,9 +17,13 @@ class Deduplicator:
     config: DedupeConfig = field(default_factory=DedupeConfig)
     _seen: set[str] = field(default_factory=set, repr=False)
     duplicates: int = 0
+    # Shared by every worker thread: the seen-set is the one piece of job-wide state
+    # that decides whether a record is written at all.
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
     def reset(self) -> None:
-        self._seen.clear()
+        with self._lock:
+            self._seen.clear()
 
     def key_for(self, record: Record) -> str:
         if self.config.keys:
@@ -35,11 +40,12 @@ class Deduplicator:
         if not self.config.enabled:
             return False
         key = self.key_for(record)
-        if key in self._seen:
-            self.duplicates += 1
-            return True
-        self._seen.add(key)
-        return False
+        with self._lock:
+            if key in self._seen:
+                self.duplicates += 1
+                return True
+            self._seen.add(key)
+            return False
 
     def filter(self, records: Iterable[Record]) -> Iterator[Record]:
         for record in records:

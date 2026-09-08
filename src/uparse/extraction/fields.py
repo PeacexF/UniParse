@@ -47,12 +47,14 @@ _NAME_ATTRS = (
 )
 
 
-def from_node(node: HtmlElement, base_url: str) -> list[Candidate]:
+def from_node(
+    node: HtmlElement, base_url: str, *, limit: int = MAX_NODES_PER_RECORD
+) -> list[Candidate]:
     """All field candidates found inside one record node, with record-relative selectors."""
     out: list[Candidate] = []
     out += _record_level(node, base_url, node)
     for index, el in enumerate(node.iter()):
-        if index > MAX_NODES_PER_RECORD:
+        if index > limit:
             break
         if not isinstance(el.tag, str) or el.tag in SKIP_TAGS:
             continue

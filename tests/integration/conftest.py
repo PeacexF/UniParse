@@ -85,7 +85,44 @@ def _build_site(root: Path) -> None:
         )
     (root / "index.html").write_text('<html><body><a href="/page1.html">Catalog</a></body></html>')
     (root / "empty.html").write_text("<html><body><p>Nothing here.</p></body></html>")
+    _build_detail_pages(root, items)
+    _build_robots(root)
     _build_browser_pages(root)
+
+
+def _build_detail_pages(root: Path, items: list[tuple[str, float, str]]) -> None:
+    """One page per product, with the label/value table detail pages usually carry."""
+    (root / "p").mkdir(exist_ok=True)
+    for name, price, sku in items:
+        (root / "p" / f"{sku}.html").write_text(
+            f"""<!doctype html>
+<html lang="en"><head><title>{name} | Test Shop</title>
+<meta property="og:title" content="{name}"></head>
+<body>
+  <h1 class="product-title">{name}</h1>
+  <p class="description">The {name} is built for people who test parsers.</p>
+  <table class="specs">
+    <tr><th>SKU</th><td>{sku.upper()}</td></tr>
+    <tr><th>Brand</th><td>Testronics</td></tr>
+    <tr><th>Availability</th><td>In stock (7 available)</td></tr>
+  </table>
+  <span class="price">${price:,.2f}</span>
+</body></html>
+""",
+            encoding="utf-8",
+        )
+
+
+def _build_robots(root: Path) -> None:
+    (root / "robots.txt").write_text("User-agent: *\nDisallow: /private/\n", encoding="utf-8")
+    (root / "private").mkdir(exist_ok=True)
+    (root / "private" / "secret.html").write_text(
+        "<html><body><ul>"
+        "<li class='product'><h2>Hidden One</h2><span class='price'>$1.00</span></li>"
+        "<li class='product'><h2>Hidden Two</h2><span class='price'>$2.00</span></li>"
+        "</ul></body></html>",
+        encoding="utf-8",
+    )
 
 
 # A 1x1 PNG. Real bytes, so a blocked request is visibly different from a served one.

@@ -213,6 +213,7 @@ class JobStats:
     pages_blocked: int = 0
     records: int = 0
     duplicates: int = 0
+    followed: int = 0
     retries: int = 0
     errors_by_code: dict[str, int] = field(default_factory=dict)
 
@@ -232,6 +233,7 @@ class JobStats:
             "pages_blocked": self.pages_blocked,
             "records": self.records,
             "duplicates": self.duplicates,
+            "followed": self.followed,
             "retries": self.retries,
             "duration_s": round(self.duration_s, 2),
             "errors_by_code": dict(self.errors_by_code),

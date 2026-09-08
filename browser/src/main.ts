@@ -8,6 +8,7 @@ import {
   type Response,
   WorkerError,
   exitAfterFlush,
+  exitOnBrokenPipe,
   guardStdout,
   log,
   parseRequest,
@@ -17,6 +18,8 @@ import {
 } from './protocol.js';
 
 const NAME = 'uparse-browser';
+const ORPHAN_CHECK_MS = 2_000;
+const ORPHAN_EXIT_MS = 3_000;
 
 let runtime: Runtime | undefined;
 let stopping = false;
@@ -114,8 +117,42 @@ async function handle(request: Request): Promise<void> {
   if (stopping && inflight === 0) exitAfterFlush(0);
 }
 
+/**
+ * Exit when the Python side goes away.
+ *
+ * Closing stdin is the intended signal, but Chromium inherits that pipe: while a browser
+ * it launched is still alive the write end stays open, no EOF ever arrives, and the worker
+ * keeps running (and burning CPU) long after anything can talk to it. Being reparented to
+ * init is the unambiguous fact, so watch for that too.
+ */
+function watchParent(): void {
+  const original = process.ppid;
+  // Deliberately not unref'd: this check is the last thing keeping an orphan honest.
+  setInterval(() => {
+    if (process.ppid === original && process.ppid !== 1) return;
+    log(`parent ${original} is gone; exiting`);
+    stopping = true;
+    // Closing Chromium is worth a try, but never worth waiting on: its pipes are broken
+    // too, and a hung close is exactly how a worker ends up outliving everything.
+    const hard = setTimeout(() => process.exit(0), ORPHAN_EXIT_MS);
+    void runtime
+      ?.shutdown()
+      .catch(() => undefined)
+      .finally(() => {
+        clearTimeout(hard);
+        process.exit(0);
+      });
+    if (!runtime) {
+      clearTimeout(hard);
+      process.exit(0);
+    }
+  }, ORPHAN_CHECK_MS);
+}
+
 function main(): void {
+  exitOnBrokenPipe();
   guardStdout();
+  watchParent();
   process.stdin.setEncoding('utf8');
 
   const lines = createInterface({ input: process.stdin, crlfDelay: Infinity });
