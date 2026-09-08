@@ -85,9 +85,40 @@ def _build_site(root: Path) -> None:
         )
     (root / "index.html").write_text('<html><body><a href="/page1.html">Catalog</a></body></html>')
     (root / "empty.html").write_text("<html><body><p>Nothing here.</p></body></html>")
+    _build_obscured_page(root)
     _build_detail_pages(root, items)
     _build_robots(root)
     _build_browser_pages(root)
+
+
+def _build_obscured_page(root: Path) -> None:
+    """A listing whose class names say nothing — the case the vocabulary cannot solve.
+
+    Every column here is real data, but only `title` and `url` are nameable without
+    looking at the values. The timestamp column is what an assisting model is for.
+    """
+    cards = "\n".join(
+        f"""
+      <div class="sc-a1b2c3">
+        <h2 class="sc-d4e5f6"><a href="/p/{sku}.html">{name}</a></h2>
+        <span class="sc-g7h8i9">{stamp}</span>
+        <span class="sc-j1k2l3">{desk}</span>
+      </div>"""
+        for name, sku, stamp, desk in [
+            ("Quantum Ledger Rewrites Banking", "a1", "3 hrs ago", "Finance"),
+            ("Fusion Plant Clears Final Review", "a2", "6 hrs ago", "Science"),
+            ("Rail Network Doubles Capacity", "a3", "9 hrs ago", "Transport"),
+            ("Coastal Cities Adopt New Code", "a4", "12 hrs ago", "Politics"),
+        ]
+    )
+    (root / "obscured.html").write_text(
+        f"""<!doctype html>
+<html lang="en"><head><title>Obscured feed</title></head>
+<body><main><div class="sc-outer">{cards}
+</div></main></body></html>
+""",
+        encoding="utf-8",
+    )
 
 
 def _build_detail_pages(root: Path, items: list[tuple[str, float, str]]) -> None:

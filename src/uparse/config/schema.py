@@ -9,6 +9,7 @@ OutputFormat = Literal["json", "jsonl", "csv", "sqlite"]
 ExtractionMode = Literal["auto", "manual"]
 WaitUntil = Literal["load", "domcontentloaded", "networkidle", "commit"]
 AcquirerName = Literal["auto", "browser", "http", "file"]
+AssistProvider = Literal["null", "openai_compatible", "command", "anthropic"]
 
 
 class Base(BaseModel):
@@ -193,6 +194,33 @@ class FollowConfig(Base):
     same_host: bool = True
 
 
+class AssistConfig(Base):
+    """Optional LLM assist. Only `uparse generate` reads this; scraping never does.
+
+    Free tiers first: `openai_compatible` reaches Gemini, Ollama and LM Studio alike, and
+    `command` reaches anything runnable in a terminal. A key is named, never stored.
+    """
+
+    provider: AssistProvider = "null"
+    model: str = "gemini-3-flash"
+    base_url: str | None = None
+    api_key_env: str | None = None
+    command: list[str] = Field(default_factory=list)
+    tier: Literal["schema", "json", "text"] = "json"
+    min_coverage: float = Field(default=0.8, ge=0.0, le=1.0)
+    max_fields: int = Field(default=24, ge=1, le=200)
+    cache: bool = True
+    timeout_s: float = Field(default=60.0, gt=0.0, le=600.0)
+
+    @model_validator(mode="after")
+    def _check(self) -> AssistConfig:
+        if self.provider == "openai_compatible" and not self.base_url:
+            raise ValueError("assist.provider='openai_compatible' requires 'base_url'")
+        if self.provider == "command" and not self.command:
+            raise ValueError("assist.provider='command' requires 'command'")
+        return self
+
+
 class Config(Base):
     sources: SourcesConfig = Field(default_factory=SourcesConfig)
     browser: BrowserConfig = Field(default_factory=BrowserConfig)
@@ -203,6 +231,7 @@ class Config(Base):
     output: OutputConfig = Field(default_factory=OutputConfig)
     politeness: PolitenessConfig = Field(default_factory=PolitenessConfig)
     follow: FollowConfig = Field(default_factory=FollowConfig)
+    assist: AssistConfig = Field(default_factory=AssistConfig)
     # Sources processed at once. Per-host limits still apply, so this is a job-wide
     # budget rather than permission to point every thread at one site.
     concurrency: int = Field(default=4, ge=1, le=64)

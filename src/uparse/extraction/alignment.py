@@ -273,6 +273,19 @@ def candidates(nodes: list[HtmlElement], base_url: str) -> list[list[Candidate]]
     return out
 
 
+def columns_of(nodes: list[HtmlElement]) -> list[Column]:
+    """Every column this collection shares, named or not."""
+    if len(nodes) < MIN_RECORDS:
+        return []
+    return _columns([_paths(node) for node in nodes])
+
+
+def name_of(column: Column) -> str | None:
+    """The name this column earns from its own values and markup, or None."""
+    naming = _name(column)
+    return None if naming is None else naming[0]
+
+
 def _paths(node: HtmlElement) -> dict[str, HtmlElement]:
     """Relative selector -> element, for the parts of a record worth treating as a column."""
     found: dict[str, HtmlElement] = {}

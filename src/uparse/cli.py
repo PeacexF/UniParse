@@ -175,6 +175,73 @@ def inspect(
 
 
 @main.command(context_settings=CONTEXT)
+@click.argument("target")
+@click.option(
+    "--want",
+    help="Fields you want, e.g. 'name, price, stock'. Optional, but strongly recommended: "
+    "with it the model maps a schema, without it it only names what it finds.",
+)
+@click.option("-o", "--output", type=click.Path(path_type=Path), help="Write the job file here.")
+@click.option("--no-browser", is_flag=True, help="Use plain HTTP instead of Chromium.")
+@click.option("--no-cache", is_flag=True, help="Ignore any cached proposal for this page.")
+@click.option("-c", "--config", "config_path", type=click.Path(exists=True, path_type=Path))
+@common_options
+def generate(
+    target: str,
+    want: str | None,
+    output: Path | None,
+    no_browser: bool,
+    no_cache: bool,
+    config_path: Path | None,
+    **options: Any,
+) -> None:
+    """Draft a job.jsonc for a page, with an optional model naming what it finds."""
+    setup_logging(options["verbose"], debug=options["debug"])
+    config = _build_config({"no_browser": no_browser, "config_path": config_path})
+    try:
+        urls = _urls(config, target)
+        acquirer = build_acquirer(config, urls)
+        try:
+            page = acquirer.fetch(urls[0])
+        finally:
+            acquirer.close()
+    except UparseError as exc:
+        die(str(exc))
+        return
+
+    from uparse.assist import generate as run_generate
+
+    result = run_generate(page, config, want=want, cache=not no_cache)
+    if output:
+        output.write_text(result.jsonc, encoding="utf-8")
+    else:
+        click.echo(result.jsonc)
+    _generated_summary(result, output)
+
+
+def _generated_summary(result: Any, output: Path | None) -> None:
+    console.print()
+    if result.error:
+        console.print(f"  [warn]assist unavailable[/warn]  {result.error}")
+        console.print("  [muted]the file below is the engine's own inference[/muted]")
+    else:
+        source = "cached" if result.cached else result.provider
+        console.print(
+            f"  [ok]{len(result.verdict.accepted)}[/ok] fields accepted [muted]({source})[/muted]"
+        )
+    for item in result.verdict.accepted:
+        console.print(
+            f"    [field]{item.name:<16}[/field] [score]{item.coverage:.0%}[/score]"
+            f"  [muted]{item.why or item.sample}[/muted]"
+        )
+    for item in result.verdict.rejected:
+        console.print(f"    [fail]{item.name:<16}[/fail] rejected: {item.reason}")
+    if output:
+        console.print()
+        console.print(f"wrote [url]{output}[/url] — review it, then [muted]uparse {output}[/muted]")
+
+
+@main.command(context_settings=CONTEXT)
 @click.argument("db", type=click.Path(exists=True, path_type=Path))
 @click.option("-o", "--output", type=click.Path(path_type=Path))
 @click.option("-c", "--config", "config_path", type=click.Path(exists=True, path_type=Path))
