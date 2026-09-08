@@ -26,8 +26,6 @@ _RECORDISH_CLASSES = frozenset(
         "entries",
         "result",
         "results",
-        "row",
-        "rows",
         "post",
         "posts",
         "tile",
@@ -87,17 +85,47 @@ def _groups(root: HtmlElement, min_records: int) -> list[_Group]:
         children = [c for c in parent if isinstance(c.tag, str) and c.tag not in SKIP_TAGS]
         if len(children) < max(min_records, MIN_GROUP):
             continue
-        buckets: dict[str, list[HtmlElement]] = defaultdict(list)
-        prints: dict[int, Fingerprint] = {}
-        for child in children:
-            fp = fingerprint(child)
-            prints[id(child)] = fp
-            buckets[f"{child.tag}:{','.join(sorted(fp.class_tokens))}"].append(child)
-        for nodes in buckets.values():
-            if len(nodes) < max(min_records, MIN_GROUP):
-                continue
-            out.append(_Group(parent, nodes, [prints[id(n)] for n in nodes]))
+        out += _bucket(parent, children, min_records)
+        out += _bucket(parent, _grandchildren(children), min_records, spanning=children)
     return out
+
+
+def _bucket(
+    parent: HtmlElement,
+    nodes: list[HtmlElement],
+    min_records: int,
+    *,
+    spanning: list[HtmlElement] | None = None,
+) -> list[_Group]:
+    buckets: dict[str, list[HtmlElement]] = defaultdict(list)
+    prints: dict[int, Fingerprint] = {}
+    for node in nodes:
+        fp = fingerprint(node)
+        prints[id(node)] = fp
+        buckets[f"{node.tag}:{','.join(sorted(fp.class_tokens))}"].append(node)
+
+    out: list[_Group] = []
+    for group in buckets.values():
+        if len(group) < max(min_records, MIN_GROUP):
+            continue
+        if spanning is not None and not _spans(group, spanning):
+            continue
+        out.append(_Group(parent, group, [prints[id(n)] for n in group]))
+    return out
+
+
+def _grandchildren(children: list[HtmlElement]) -> list[HtmlElement]:
+    """Items laid out in wrapper rows (a Bootstrap grid) are grandchildren, not siblings."""
+    out: list[HtmlElement] = []
+    for child in children:
+        out += [c for c in child if isinstance(c.tag, str) and c.tag not in SKIP_TAGS]
+    return out
+
+
+def _spans(group: list[HtmlElement], wrappers: list[HtmlElement]) -> bool:
+    """Only unwrap when the items really are spread across the wrappers, not inside one."""
+    owners = {id(node.getparent()) for node in group}
+    return len(owners) >= min(2, len(wrappers))
 
 
 def _score(group: _Group, root: HtmlElement) -> CollectionCandidate:
@@ -189,19 +217,31 @@ def _label(node: HtmlElement, classes: set[str]) -> str:
     return str(node.tag)
 
 
+NESTED_MARGIN = 0.12
+
+
 def _drop_nested(candidates: list[CollectionCandidate]) -> list[CollectionCandidate]:
-    """Keep the outermost winner when one group's items contain another's."""
+    """Collapse groups that contain one another, keeping the one that names records.
+
+    The outer group usually wins, but a layout wrapper holding N items each is the less
+    specific answer: when the inner group has more items at a comparable score, it is the
+    collection the page is actually showing.
+    """
     kept: list[CollectionCandidate] = []
     for cand in candidates:
-        owned = {id(n) for n in cand.nodes}
-        if any(
-            _is_descendant(cand.nodes[0], k.nodes) or id(cand.nodes[0]) in {id(x) for x in k.nodes}
-            for k in kept
-        ):
+        enclosing = next((k for k in kept if _inside(cand, k)), None)
+        if enclosing is None:
+            kept.append(cand)
             continue
-        del owned
-        kept.append(cand)
+        if cand.count > enclosing.count and cand.confidence >= enclosing.confidence - NESTED_MARGIN:
+            kept[kept.index(enclosing)] = cand
     return kept
+
+
+def _inside(cand: CollectionCandidate, other: CollectionCandidate) -> bool:
+    return _is_descendant(cand.nodes[0], other.nodes) or id(cand.nodes[0]) in {
+        id(x) for x in other.nodes
+    }
 
 
 def _is_descendant(node: HtmlElement, ancestors: list[HtmlElement]) -> bool:

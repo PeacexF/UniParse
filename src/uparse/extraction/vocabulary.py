@@ -13,7 +13,6 @@ FIELD_TOKENS: dict[str, frozenset[str]] = {
             "productname",
             "producttitle",
             "itemtitle",
-            "label",
         }
     ),
     "description": frozenset(
@@ -107,11 +106,11 @@ FIELD_TOKENS: dict[str, frozenset[str]] = {
         {"availability", "stock", "instock", "stockstatus", "available", "inventory"}
     ),
     "location": frozenset(
-        {"location", "address", "place", "city", "region", "venue", "country", "area", "district"}
+        {"location", "address", "place", "city", "region", "venue", "country", "district"}
     ),
-    "phone": frozenset({"phone", "tel", "telephone", "mobile", "contactphone"}),
+    "phone": frozenset({"phone", "tel", "telephone", "contactphone"}),
     "email": frozenset({"email", "mail", "emailaddress"}),
-    "discount": frozenset({"discount", "sale", "percentoff", "savings", "badge"}),
+    "discount": frozenset({"discount", "percentoff", "savings"}),
     "duration": frozenset({"duration", "length", "runtime", "readtime"}),
     "salary": frozenset({"salary", "wage", "compensation", "pay", "payrange"}),
     "company": frozenset({"company", "employer", "organization", "org", "firm"}),

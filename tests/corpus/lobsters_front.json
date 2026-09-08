@@ -1,0 +1,19 @@
+{
+  "url": "https://lobste.rs/",
+  "note": "Dense byline markup: generic class tokens used to produce a phone and a title.",
+  "expect": {
+    "strategy": "dom",
+    "records": 25,
+    "required_fields": [
+      "url",
+      "date"
+    ],
+    "absent_fields": [
+      "phone"
+    ],
+    "first_record": {
+      "url": "https://bergie.iki.fi/blog/eupl/",
+      "category": "law"
+    }
+  }
+}

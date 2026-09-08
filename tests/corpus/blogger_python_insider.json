@@ -1,0 +1,23 @@
+{
+  "url": "https://blog.python.org/",
+  "note": "Blogger with Tailwind utility classes; none of them may become field names.",
+  "expect": {
+    "strategy": "dom",
+    "records": 8,
+    "required_fields": [
+      "title",
+      "url",
+      "date"
+    ],
+    "absent_fields": [
+      "semibold",
+      "medium",
+      "snug",
+      "normal"
+    ],
+    "first_record": {
+      "title": "RISC-V is now officially supported by CPython!",
+      "date": "2026-08-24T00:00:00"
+    }
+  }
+}

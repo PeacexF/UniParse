@@ -1,0 +1,18 @@
+{
+  "url": "https://quotes.toscrape.com/",
+  "note": "Microdata quotes. The quote itself has no vocabulary hook; alignment finds it.",
+  "expect": {
+    "strategy": "dom",
+    "records": 10,
+    "required_fields": [
+      "author",
+      "description"
+    ],
+    "first_record": {
+      "author": "Albert Einstein",
+      "description": {
+        "contains": "The world as we have created it"
+      }
+    }
+  }
+}

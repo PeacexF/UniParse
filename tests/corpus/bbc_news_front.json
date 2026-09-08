@@ -1,0 +1,15 @@
+{
+  "url": "https://www.bbc.com/news",
+  "note": "CSS-in-JS class names throughout; only structure can name anything here.",
+  "expect": {
+    "strategy": "dom",
+    "min_records": 4,
+    "required_fields": [
+      "title",
+      "url"
+    ],
+    "absent_fields": [
+      "price"
+    ]
+  }
+}

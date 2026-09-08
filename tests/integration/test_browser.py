@@ -35,7 +35,8 @@ def acquirer():
     made: list[BrowserAcquirer] = []
 
     def _make(**browser: object) -> BrowserAcquirer:
-        config = Config(browser=BrowserConfig(timeout=15_000, **browser), acquirer="browser")
+        settings: dict[str, object] = {"timeout": 15_000, **browser}
+        config = Config(browser=BrowserConfig(**settings), acquirer="browser")
         instance = BrowserAcquirer(config)
         made.append(instance)
         return instance

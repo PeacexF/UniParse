@@ -227,7 +227,11 @@ class BrowserAcquirer:
             elapsed_ms=int((time.perf_counter() - started) * 1000),
             acquirer=self.name,
             depth=depth,
-            metadata={"worker": True, "scrolls": data.get("scrolls", 0)},
+            metadata={
+                "worker": True,
+                "scrolls": data.get("scrolls", 0),
+                "pageId": data.get("pageId"),
+            },
         )
 
     def close(self) -> None:

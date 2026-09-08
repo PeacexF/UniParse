@@ -46,3 +46,4 @@ htmlcov/
 *.egg-info/
 *.db
 *.csv
+data/

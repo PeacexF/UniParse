@@ -7,7 +7,9 @@ from typing import Any
 
 from lxml.html import HtmlElement
 
+from uparse.core.models import ValueType
 from uparse.extraction.htmlutil import absolutize, clean_text, node_text
+from uparse.extraction.vocabulary import FIELD_TYPES, field_for_schema_key
 
 # Schema.org types we treat as record-bearing. Anything else is kept but ranked lower.
 RECORD_TYPES = frozenset(
@@ -170,7 +172,7 @@ def _microdata_item(scope: HtmlElement, base_url: str) -> dict[str, Any]:
         if prop.get("itemscope") is not None:
             value = _microdata_item(prop, base_url)
         else:
-            value = _microdata_value(prop, base_url)
+            value = _microdata_value(prop, base_url, names)
         if value in ("", None):
             continue
         for name in names:
@@ -180,6 +182,15 @@ def _microdata_item(scope: HtmlElement, base_url: str) -> dict[str, Any]:
             else:
                 item[name] = value
     return item
+
+
+def wants_text(names: list[str] | None) -> bool:
+    """True when every property name this element carries maps to a text field."""
+    if not names:
+        return False
+    resolved = [field_for_schema_key(name) for name in names]
+    known = [FIELD_TYPES.get(field) for field in resolved if field]
+    return bool(known) and all(vtype not in (ValueType.URL, None) for vtype in known)
 
 
 def _iter_props(scope: HtmlElement) -> Iterator[HtmlElement]:
@@ -199,11 +210,17 @@ def _iter_props(scope: HtmlElement) -> Iterator[HtmlElement]:
             yield el
 
 
-def _microdata_value(el: HtmlElement, base_url: str) -> Any:
+def _microdata_value(el: HtmlElement, base_url: str, names: list[str] | None = None) -> Any:
     match el.tag:
         case "meta":
             return clean_text(el.get("content"))
         case "a" | "area" | "link":
+            # The spec says an anchor's value is its href, which turns
+            # `<a itemprop="name">Product</a>` into a URL. Text wins for text-valued props.
+            if wants_text(names):
+                text = node_text(el, limit=2000)
+                if text:
+                    return text
             return absolutize(base_url, el.get("href"))
         case "img" | "audio" | "video" | "embed" | "iframe" | "source" | "track":
             return absolutize(base_url, el.get("src"))

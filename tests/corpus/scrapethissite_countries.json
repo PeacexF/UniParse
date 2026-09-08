@@ -1,0 +1,18 @@
+{
+  "url": "https://www.scrapethissite.com/pages/simple/",
+  "note": "250 countries wrapped 3-per-row by a Bootstrap grid; fields named by the page.",
+  "expect": {
+    "strategy": "dom",
+    "records": 250,
+    "required_fields": [
+      "title",
+      "capital",
+      "population"
+    ],
+    "first_record": {
+      "title": "Andorra",
+      "capital": "Andorra la Vella",
+      "population": "84000"
+    }
+  }
+}

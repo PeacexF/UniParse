@@ -1,0 +1,17 @@
+{
+  "url": "https://news.ycombinator.com/",
+  "note": "A layout table wrapping the real list. Table extraction must not pre-empt the DOM.",
+  "expect": {
+    "strategy": "dom",
+    "min_records": 25,
+    "required_fields": [
+      "title",
+      "url"
+    ],
+    "absent_fields": [
+      "column_1",
+      "column_2",
+      "column_3"
+    ]
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "url": "https://realpython.com/",
+  "note": "Card grid with dates and images.",
+  "expect": {
+    "strategy": "dom",
+    "min_records": 15,
+    "required_fields": [
+      "title",
+      "url",
+      "date"
+    ],
+    "absent_fields": [
+      "discount"
+    ]
+  }
+}

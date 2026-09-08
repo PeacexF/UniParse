@@ -145,6 +145,8 @@ class Record:
     index: int = 0
     page_url: str = ""
     collection: str = ""
+    # The DOM node this record was read from, when there was one. Never serialized.
+    node: Any = field(default=None, repr=False, compare=False)
 
     def __contains__(self, name: str) -> bool:
         return name in self.fields

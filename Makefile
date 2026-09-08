@@ -54,6 +54,10 @@ test: ## Run the test suite (skips browser-marked tests)
 test-all: browser ## Run everything, including browser integration tests
 	$(RUN) pytest
 
+.PHONY: eval
+eval: ## Score the extraction engine against the saved corpus: make eval ARGS=-v
+	$(RUN) python tools/eval.py $(ARGS)
+
 .PHONY: cov
 cov: ## Test suite with coverage report
 	$(RUN) pytest -m "not browser" --cov --cov-report=term-missing

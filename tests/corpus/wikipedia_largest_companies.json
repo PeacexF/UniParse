@@ -1,0 +1,21 @@
+{
+  "url": "https://en.wikipedia.org/wiki/List_of_largest_companies_by_revenue",
+  "note": "Row headers plus colspan/rowspan: the shape that used to shift every column.",
+  "expect": {
+    "strategy": "table",
+    "records": 50,
+    "required_fields": [
+      "title",
+      "revenue",
+      "profit",
+      "employees"
+    ],
+    "first_record": {
+      "ranks": "1",
+      "title": "Amazon",
+      "revenue": "716",
+      "profit": "79.9",
+      "employees": "1,576,000"
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "url": "https://github.com/trending",
+  "note": "Utility classes plus a repo description; the description must survive naming.",
+  "expect": {
+    "strategy": "dom",
+    "min_records": 15,
+    "required_fields": [
+      "title",
+      "url",
+      "description"
+    ],
+    "absent_fields": [
+      "inline",
+      "condensed",
+      "normal"
+    ]
+  }
+}

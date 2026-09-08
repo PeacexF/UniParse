@@ -141,8 +141,12 @@ def _int(value: str | None) -> int | None:
         return None
 
 
-def css_path(node: HtmlElement, root: HtmlElement | None = None) -> str:
-    """Short, human-readable selector used for provenance, not for re-querying."""
+def css_path(node: HtmlElement, root: HtmlElement | None = None, *, use_ids: bool = True) -> str:
+    """A selector for `node`, relative to `root` when one is given.
+
+    With `use_ids=False` the walk never short-circuits on an id, which is what makes a
+    record-relative path reusable: ids inside a record are usually unique per record.
+    """
     parts: list[str] = []
     current: HtmlElement | None = node
     while current is not None and isinstance(current.tag, str):
@@ -150,7 +154,7 @@ def css_path(node: HtmlElement, root: HtmlElement | None = None) -> str:
             break
         step = current.tag
         node_id = current.get("id")
-        if node_id and " " not in node_id:
+        if use_ids and node_id and " " not in node_id:
             parts.append(f"#{node_id}")
             break
         classes = [c for c in (current.get("class") or "").split() if c and "  " not in c][:2]
@@ -164,6 +168,20 @@ def css_path(node: HtmlElement, root: HtmlElement | None = None) -> str:
         parts.append(step)
         current = current.getparent()
     return " > ".join(reversed(parts)) or node.tag
+
+
+def relative_css_path(node: HtmlElement, record: HtmlElement) -> str:
+    """Selector for `node` within `record`, re-queryable against every record in a collection."""
+    if node is record:
+        return ":scope"
+    return css_path(node, record, use_ids=False)
+
+
+def select_within(record: HtmlElement, selector: str) -> list[HtmlElement]:
+    """Run a record-relative selector inside one record node."""
+    if selector.strip() in {":scope", "."}:
+        return [record]
+    return select(record, selector)
 
 
 def xpath_of(node: HtmlElement) -> str:

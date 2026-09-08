@@ -1,0 +1,19 @@
+{
+  "url": "https://webscraper.io/test-sites/e-commerce/allinone",
+  "note": "Microdata products. `<a itemprop=\"name\">` must yield text, not its href.",
+  "expect": {
+    "strategy": "structured",
+    "records": 3,
+    "required_fields": [
+      "title",
+      "price",
+      "description"
+    ],
+    "first_record": {
+      "title": {
+        "startswith": "Aspire"
+      },
+      "currency": "USD"
+    }
+  }
+}

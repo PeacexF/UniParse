@@ -12,7 +12,7 @@ BASE = "https://shop.test/laptops"
 def _best(html_text, base=BASE):
     root = parse(html_text, base)
     node = discover(root)[0].nodes[0]
-    return best_per_field(fld.from_node(node, base, root))
+    return best_per_field(fld.from_node(node, base))
 
 
 def test_listing_card_yields_the_expected_fields(fixture_html):

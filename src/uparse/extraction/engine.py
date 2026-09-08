@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import re
 from collections import Counter
 from dataclasses import dataclass
 from dataclasses import field as dc_field
 from typing import Any
 
+from lxml.etree import tostring
 from lxml.html import HtmlElement
 
 from uparse.config.schema import ExtractionConfig, FieldSpec
@@ -19,22 +21,44 @@ from uparse.core.models import (
     Source,
     ValueType,
 )
+from uparse.extraction import alignment as align
 from uparse.extraction import collections as coll
 from uparse.extraction import fields as fld
 from uparse.extraction import structured as sd
 from uparse.extraction import tables as tbl
-from uparse.extraction.htmlutil import absolutize, hydrate, node_text, parse, select
+from uparse.extraction.htmlutil import (
+    absolutize,
+    hydrate,
+    image_url,
+    node_text,
+    parse,
+    select,
+    select_within,
+)
 from uparse.extraction.vocabulary import FIELD_TYPES
 from uparse.processing.normalize import coerce, normalize_enum
 from uparse.processing.scoring import apply_consistency, base_signal, best_per_field, score
 
 Strategy = str
 
+# Structured data is machine-readable and authored by the site; only a configured
+# collection (confidence 1.0) outranks it.
+STRUCTURED_QUALITY = 0.95
+
+
+@dataclass(slots=True)
+class _Attempt:
+    strategy: Strategy
+    records: list[Record]
+    quality: float
+    collection: CollectionCandidate | None = None
+
 
 @dataclass(slots=True)
 class ExtractionResult:
     records: list[Record] = dc_field(default_factory=list)
     strategy: Strategy = "none"
+    quality: float = 0.0
     collection: CollectionCandidate | None = None
     collections: list[CollectionCandidate] = dc_field(default_factory=list)
     structured_counts: Counter[str] = dc_field(default_factory=Counter)
@@ -55,22 +79,11 @@ def extract(page: PageModel, config: ExtractionConfig | None = None) -> Extracti
 
     result.collections = coll.discover(root, min_records=cfg.min_records)
 
-    records = _from_structured(blocks, page, cfg)
-    if records:
-        result.strategy = "structured"
-    if not records and cfg.include_tables:
-        records = tbl.extract(root, page.base_url, min_rows=cfg.min_records)
-        if records:
-            result.strategy = "table"
-    if not records:
-        records, chosen = _from_dom(root, page, cfg, result.collections)
-        result.collection = chosen
-        if records:
-            result.strategy = "dom"
-    if not records:
-        records = _single_record(blocks, page, cfg)
-        if records:
-            result.strategy = "page"
+    attempt = _arbitrate(root, blocks, page, cfg, result)
+    records = attempt.records
+    result.strategy = attempt.strategy
+    result.quality = attempt.quality
+    result.collection = attempt.collection
 
     _apply_config_fields(records, root, page, cfg)
     _finalize(records, page, cfg)
@@ -80,6 +93,47 @@ def extract(page: PageModel, config: ExtractionConfig | None = None) -> Extracti
     result.records = records[: cfg.max_records_per_page]
     result.schema = _schema(result.records)
     return result
+
+
+def _arbitrate(
+    root: HtmlElement,
+    blocks: list[dict[str, Any]],
+    page: PageModel,
+    cfg: ExtractionConfig,
+    result: ExtractionResult,
+) -> _Attempt:
+    """Run every viable strategy and keep the best, rather than the first that answers.
+
+    A layout table used to pre-empt a high-confidence DOM collection simply because
+    tables were tried first; now each strategy states a quality and the highest wins.
+    """
+    attempts: list[_Attempt] = []
+
+    structured = _from_structured(blocks, page, cfg)
+    if structured:
+        attempts.append(_Attempt("structured", structured, STRUCTURED_QUALITY))
+
+    if cfg.include_tables:
+        table = tbl.best(root, min_rows=cfg.min_records)
+        if table is not None:
+            rows = tbl.rows_of(table, page.base_url, root)
+            if rows:
+                attempts.append(_Attempt("table", rows, table.confidence))
+                result.notes.append(f"table candidate: {table.confidence:.2f} ({table.rows} rows)")
+
+    dom_records, chosen = _from_dom(root, page, cfg, result.collections)
+    if dom_records and chosen is not None:
+        attempts.append(_Attempt("dom", dom_records, chosen.confidence, chosen))
+
+    if attempts:
+        best = max(attempts, key=lambda a: (a.quality, len(a.records)))
+        if len(attempts) > 1:
+            losers = ", ".join(f"{a.strategy} {a.quality:.2f}" for a in attempts if a is not best)
+            result.notes.append(f"chose {best.strategy} {best.quality:.2f} over {losers}")
+        return best
+
+    single = _single_record(blocks, page, cfg)
+    return _Attempt("page" if single else "none", single, 0.3 if single else 0.0)
 
 
 # ------------------------------------------------------------- strategies
@@ -134,13 +188,19 @@ def _from_dom(
     if chosen is None or not chosen.nodes:
         return [], None
 
-    per_record = [fld.from_node(node, page.base_url, root) for node in chosen.nodes]
+    per_record = [fld.from_node(node, page.base_url) for node in chosen.nodes]
+    # Columns the whole collection shares fill the gaps the vocabulary cannot name.
+    for found, aligned in zip(
+        per_record, align.candidates(chosen.nodes, page.base_url), strict=True
+    ):
+        found += aligned
     grouped = [fld.group_by_field(c) for c in per_record]
     apply_consistency(grouped)
-    records = [
-        _record_from_candidates(cands, index, page, chosen.label)
-        for index, cands in enumerate(per_record)
-    ]
+    records = []
+    for index, (cands, node) in enumerate(zip(per_record, chosen.nodes, strict=True)):
+        record = _record_from_candidates(cands, index, page, chosen.label)
+        record.node = node
+        records.append(record)
     return [r for r in records if r.fields], chosen
 
 
@@ -187,26 +247,25 @@ def _single_record(
 def _apply_config_fields(
     records: list[Record], root: HtmlElement, page: PageModel, cfg: ExtractionConfig
 ) -> None:
-    """Explicit configuration always wins; it runs last and overwrites inference."""
+    """Explicit configuration always wins; it runs last and overwrites inference.
+
+    A selector is resolved inside the record's own node whenever the record has one, so
+    a pinned field varies per record instead of repeating the first match on the page.
+    """
     if not cfg.fields:
         return
-    nodes = [None] * len(records)
     for name, spec in cfg.fields.items():
         if spec.mode == "auto":
             continue
-        for index, record in enumerate(records):
-            scope = nodes[index] if nodes[index] is not None else root
-            value = _apply_spec(spec, scope, page)
+        for record in records:
+            scope = record.node if record.node is not None else root
+            value = _apply_spec(spec, scope, page, name)
             if value is None and spec.default is not None:
                 value = spec.default
             if value is None:
                 record.fields.pop(name, None)
                 continue
-            vtype = (
-                ValueType(spec.type)
-                if spec.type != "auto"
-                else FIELD_TYPES.get(name, ValueType.STRING)
-            )
+            vtype = _config_type(spec, name)
             coerced, actual = coerce(value, vtype, base_url=page.base_url)
             record.set(
                 FieldValue(
@@ -222,37 +281,71 @@ def _apply_config_fields(
             )
 
 
-def _apply_spec(spec: FieldSpec, scope: HtmlElement, page: PageModel) -> Any:
+def _apply_spec(spec: FieldSpec, scope: HtmlElement, page: PageModel, name: str = "") -> Any:
     match spec.mode:
         case "constant":
             return spec.value
         case "regex":
-            import re
-
-            found = re.search(spec.regex or "", page.text or page.html)
+            haystack = (
+                node_text(scope) if scope.getparent() is not None else (page.text or page.html)
+            )
+            found = re.search(spec.regex or "", haystack)
             return (found.group(1) if found.groups() else found.group(0)) if found else None
         case "attribute":
-            found_nodes = select(scope, spec.selector or "")
+            found_nodes = select_within(scope, spec.selector or "")
             if not found_nodes:
                 return None
-            raw = found_nodes[0].get(spec.attribute or "")
             if spec.many:
-                return [n.get(spec.attribute or "") for n in found_nodes]
-            return raw
+                return [_attr_value(n, spec.attribute or "", page) for n in found_nodes]
+            return _attr_value(found_nodes[0], spec.attribute or "", page)
         case "selector":
-            found_nodes = select(scope, spec.selector or "")
+            found_nodes = select_within(scope, spec.selector or "")
             if not found_nodes:
                 return None
+            wants_url = _wants_url(spec, name)
             if spec.many:
-                return [node_text(n, limit=2000) for n in found_nodes]
-            node = found_nodes[0]
-            if node.tag == "a" and node.get("href"):
-                return absolutize(page.base_url, node.get("href"))
-            if node.tag == "img":
-                return absolutize(page.base_url, node.get("src"))
-            return node_text(node, limit=4000)
+                return [_node_value(n, page, wants_url=wants_url) for n in found_nodes]
+            return _node_value(found_nodes[0], page, wants_url=wants_url)
         case _:
             return None
+
+
+def _config_type(spec: FieldSpec, name: str) -> ValueType:
+    """A declared type wins; asking for `text` means text, whatever the field is called."""
+    if spec.type != "auto":
+        return ValueType(spec.type)
+    if spec.mode == "attribute" and spec.attribute in {"text", "html"}:
+        return ValueType.STRING
+    return FIELD_TYPES.get(name, ValueType.STRING)
+
+
+def _wants_url(spec: FieldSpec, name: str) -> bool:
+    """A bare selector yields text unless the field is a URL — `attribute` overrides both."""
+    declared = ValueType(spec.type) if spec.type != "auto" else FIELD_TYPES.get(name)
+    return declared is ValueType.URL
+
+
+def _node_value(node: HtmlElement, page: PageModel, *, wants_url: bool) -> Any:
+    if wants_url:
+        if node.tag == "img":
+            return image_url(node, page.base_url)
+        href = node.get("href") or node.get("src") or node.get("content")
+        if href:
+            return absolutize(page.base_url, href)
+    return node_text(node, limit=4000)
+
+
+def _attr_value(node: HtmlElement, attribute: str, page: PageModel) -> Any:
+    """`text` and `html` are pseudo-attributes: the escape hatch for "text, not href"."""
+    match attribute:
+        case "text":
+            return node_text(node, limit=4000)
+        case "html":
+            return tostring(node, encoding="unicode", with_tail=False)
+        case "href" | "src" | "srcset" | "data-src":
+            return absolutize(page.base_url, node.get(attribute)) or node.get(attribute)
+        case _:
+            return node.get(attribute)
 
 
 # ------------------------------------------------------------- finishing
