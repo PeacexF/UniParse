@@ -1,0 +1,69 @@
+name: CI [uniparse]
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.14"
+
+jobs:
+  python:
+    name: python (lint · type · test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: pyproject.toml
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Install
+        run: uv pip install --python ${{ env.PYTHON_VERSION }} --system -e ".[dev]"
+
+      - name: Lint
+        run: |
+          ruff check src/uparse tests
+          ruff format --check src/uparse tests
+
+      - name: Types
+        run: mypy
+
+      - name: Tests
+        run: pytest -m "not browser" --cov --cov-report=term-missing
+
+  browser:
+    name: browser worker (build · typecheck)
+    runs-on: ubuntu-latest
+    if: hashFiles('browser/package.json') != ''
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: browser/package-lock.json
+
+      - name: Install worker deps
+        working-directory: browser
+        run: npm ci || npm install
+
+      - name: Typecheck
+        working-directory: browser
+        run: npm run typecheck
+
+      - name: Build
+        working-directory: browser
+        run: npm run build
