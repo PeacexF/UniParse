@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import threading
 from dataclasses import dataclass
 from functools import partial
@@ -84,3 +85,81 @@ def _build_site(root: Path) -> None:
         )
     (root / "index.html").write_text('<html><body><a href="/page1.html">Catalog</a></body></html>')
     (root / "empty.html").write_text("<html><body><p>Nothing here.</p></body></html>")
+    _build_browser_pages(root)
+
+
+# A 1x1 PNG. Real bytes, so a blocked request is visibly different from a served one.
+PIXEL_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+)
+
+
+def _build_browser_pages(root: Path) -> None:
+    """Pages that only mean something once JavaScript has run."""
+    (root / "pixel.png").write_bytes(PIXEL_PNG)
+
+    # Nothing in the markup; the whole catalog is written by a script.
+    (root / "js.html").write_text(
+        """<!doctype html>
+<html lang="en"><head><title>JS catalog</title></head>
+<body>
+  <div class="product-grid" id="grid"></div>
+  <script>
+    const items = [["Nova Lamp", "39.50", "lm-1"], ["Orion Desk", "249.00", "dk-9"],
+                   ["Pico Cable", "9.99", "cb-3"]];
+    addEventListener('DOMContentLoaded', () => {
+      document.getElementById('grid').innerHTML = items.map(([name, price, sku]) => `
+        <div class="product-card">
+          <h2 class="product-title"><a href="/p/${sku}.html">${name}</a></h2>
+          <span class="price">$${price}</span>
+        </div>`).join('');
+    });
+  </script>
+</body></html>
+""",
+        encoding="utf-8",
+    )
+
+    # Appends a batch every time the page is scrolled to the bottom, three times over.
+    (root / "scroll.html").write_text(
+        """<!doctype html>
+<html lang="en"><head><title>Endless catalog</title></head>
+<body>
+  <div class="product-grid" id="grid"></div>
+  <div style="height:2400px"></div>
+  <script>
+    let batch = 0;
+    function append() {
+      if (batch >= 3) return;
+      const grid = document.getElementById('grid');
+      for (let i = 0; i < 2; i++) {
+        const n = batch * 2 + i + 1;
+        grid.insertAdjacentHTML('beforeend',
+          `<div class="product-card">
+             <h2 class="product-title"><a href="/p/s${n}.html">Item ${n}</a></h2>
+             <span class="price">$${n}.00</span>
+           </div>`);
+      }
+      batch++;
+      document.body.insertAdjacentHTML('beforeend', '<div style="height:1200px"></div>');
+    }
+    append();
+    addEventListener('scroll', append);
+  </script>
+</body></html>
+""",
+        encoding="utf-8",
+    )
+
+    (root / "image.html").write_text(
+        '<html><head><title>Image</title></head><body><img id="pixel" src="/pixel.png"></body></html>',
+        encoding="utf-8",
+    )
+
+    # Detected and reported. UniParse never tries to pass a challenge.
+    (root / "challenge.html").write_text(
+        "<html><head><title>Just a moment...</title></head>"
+        '<body><div class="cf-browser-verification">Checking your browser before accessing</div>'
+        "</body></html>",
+        encoding="utf-8",
+    )

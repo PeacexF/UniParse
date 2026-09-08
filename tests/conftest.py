@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import pytest
@@ -23,3 +24,16 @@ def fixture_page(fixture_html):
         return PageModel(url=url, html=fixture_html(name), status=200)
 
     return _page
+
+
+def pytest_collection_modifyitems(config, items):
+    """Browser-marked tests need the compiled worker; skip rather than fail without it."""
+    del config
+    from uparse.acquisition.browser import WORKER_ENTRY
+
+    if WORKER_ENTRY.exists() and shutil.which("node"):
+        return
+    skip = pytest.mark.skip(reason="browser worker not built (run `make setup && make browser`)")
+    for item in items:
+        if "browser" in item.keywords:
+            item.add_marker(skip)
