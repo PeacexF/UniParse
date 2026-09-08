@@ -1,0 +1,25 @@
+# --- clean DOM listings (no structured data) ---
+https://books.toscrape.com/
+https://www.scrapethissite.com/pages/simple/
+
+# --- microdata / JSON-LD ---
+https://quotes.toscrape.com/
+https://webscraper.io/test-sites/e-commerce/allinone
+
+# --- real-world listings with hashed / framework class names ---
+https://www.bbc.com/news
+https://github.com/trending
+https://realpython.com/
+
+# --- link aggregators (layout tables, dense markup) ---
+https://news.ycombinator.com/
+https://lobste.rs/
+
+# --- blog / article feed ---
+https://blog.python.org/
+
+# --- data table ---
+https://en.wikipedia.org/wiki/List_of_largest_companies_by_revenue
+
+# --- expected to be BLOCKED: proves one bad source does not kill the job ---
+https://stackoverflow.com/questions
