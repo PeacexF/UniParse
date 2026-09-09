@@ -14,7 +14,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
 
 from eval import CORPUS, evaluate
 
-SLUGS = sorted(path.stem for path in CORPUS.glob("*.json"))
+# `<slug>.intent.json` states an intent for the assisted path, which `make eval-assist`
+# scores separately. It is not an expectation file.
+SLUGS = sorted(p.stem for p in CORPUS.glob("*.json") if not p.name.endswith(".intent.json"))
 
 
 @pytest.mark.parametrize("slug", SLUGS)

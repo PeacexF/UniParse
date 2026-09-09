@@ -136,6 +136,15 @@ def test_an_unusable_name_is_rejected(analysed):
     assert "usable field name" in verdict.rejected[0].reason
 
 
+def test_a_name_in_the_user_s_own_words_is_reshaped_not_lost(analysed):
+    """Free-tier models answer in the words of the request. `stars today` is a correct
+    mapping in bad formatting, and losing it would be losing the field."""
+    _, _, brief = analysed
+    column = next(c for c in brief.columns if c.named == "price")
+    verdict = _verdict(analysed, [{"name": "Unit Price", "column": column.id}])
+    assert [a.name for a in verdict.accepted] == ["unit_price"]
+
+
 def test_the_same_name_cannot_be_claimed_twice(analysed):
     _, _, brief = analysed
     a, b = brief.columns[0].id, brief.columns[1].id
@@ -176,3 +185,58 @@ def test_a_key_is_named_never_stored():
         provider="openai_compatible", base_url="https://x.test/v1", api_key_env="SOME_KEY"
     )
     assert "SOME_KEY" in json.dumps(config.model_dump(mode="json"))
+
+
+# --- shapes a small model actually returns ---------------------------------
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"fields": [{"name": "published", "column": "c1"}]},
+        {"published": "c1"},
+        {"published": {"column_id": "c1", "name": "published"}},
+    ],
+)
+def test_the_three_shapes_a_model_reaches_for_all_parse(payload):
+    """A free-tier model ignores the schema and answers in whatever shape it likes. Every
+    id still has to exist in the brief, so being liberal here cannot be unsafe."""
+    proposal = Proposal.from_payload(payload)
+    assert [(f.name, f.column) for f in proposal.fields] == [("published", "c1")]
+
+
+def test_a_flat_answer_does_not_swallow_keys_that_are_not_ids():
+    proposal = Proposal.from_payload({"title": "c4", "notes": "looks like a shop", "extra": ["c1"]})
+    assert [f.name for f in proposal.fields] == ["title"]
+
+
+def test_columns_the_model_calls_interface_text_are_recorded(analysed):
+    _, result, brief = analysed
+    junk = next(c for c in brief.columns if "basket" in "".join(c.samples).lower())
+    proposal = Proposal.from_payload({"fields": [], "drop": [junk.id, "c999"]})
+    verdict = check(proposal, brief, result.records)
+    assert [i.column for i in verdict.ignored] == [junk.id]
+    assert "basket" in verdict.ignored[0].sample.lower()
+
+
+def test_a_dropped_column_the_model_also_named_is_not_reported_as_dropped(analysed):
+    _, result, brief = analysed
+    column = next(c for c in brief.columns if c.named == "price")
+    proposal = Proposal.from_payload(
+        {"fields": [{"name": "price", "column": column.id}], "drop": [column.id]}
+    )
+    assert not check(proposal, brief, result.records).ignored
+
+
+# --- renaming, rather than re-reading -------------------------------------
+
+
+def test_a_renamed_field_is_measured_on_the_engine_s_own_value(analysed):
+    """`{"field": "title"}` is what the config will carry, so the coverage and the sample
+    have to describe that — not what re-running a selector would read off the page."""
+    _, result, brief = analysed
+    column = next(c for c in brief.columns if c.named == "title")
+    verdict = _verdict(analysed, [{"name": "product_name", "column": column.id}])
+    accepted = verdict.accepted[0]
+    assert accepted.engine_name == "title"
+    assert accepted.sample == result.records[0].get("title")

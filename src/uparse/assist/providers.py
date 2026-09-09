@@ -9,10 +9,14 @@ about it.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import shutil
+import signal
 import subprocess
+import tempfile
+import time
 from typing import Any
 
 import httpx
@@ -25,6 +29,8 @@ log = get_logger("assist")
 
 DEFAULT_TIMEOUT_S = 60.0
 MAX_OUTPUT_TOKENS = 2000
+RATE_LIMIT_ATTEMPTS = 3
+MAX_BACKOFF_S = 30.0
 
 
 class NullProvider:
@@ -78,18 +84,28 @@ class OpenAICompatibleProvider:
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
 
-        try:
-            response = httpx.post(
-                f"{self.base_url}/chat/completions",
-                json=payload,
-                headers=headers,
-                timeout=self.timeout_s,
-            )
-        except httpx.HTTPError as exc:
-            raise AssistError(f"{self.name}: {exc}") from exc
+        for attempt in range(1, RATE_LIMIT_ATTEMPTS + 1):
+            try:
+                response = httpx.post(
+                    f"{self.base_url}/chat/completions",
+                    json=payload,
+                    headers=headers,
+                    timeout=self.timeout_s,
+                )
+            except httpx.HTTPError as exc:
+                raise AssistError(f"{self.name}: {exc}") from exc
 
-        if response.status_code == 429:
-            raise AssistError(f"{self.name}: rate limited by the provider (HTTP 429)")
+            if response.status_code != 429:
+                break
+            if attempt == RATE_LIMIT_ATTEMPTS:
+                raise AssistError(
+                    f"{self.name}: rate limited by the provider (HTTP 429) after "
+                    f"{attempt} attempts — free tiers are typically 5-15 requests a minute"
+                )
+            delay = _retry_after(response, attempt)
+            log.info("%s rate limited; retrying in %.0fs", self.name, delay)
+            time.sleep(delay)
+
         if response.status_code >= 400:
             raise AssistError(f"{self.name}: HTTP {response.status_code} {response.text[:200]}")
         return _first_choice(response.json(), self.name)
@@ -98,9 +114,14 @@ class OpenAICompatibleProvider:
 class CommandProvider:
     """Shell out to a CLI that already has its own credentials.
 
-    `opencode run "<prompt>" --model provider/model --format json` is the motivating case,
-    but anything that reads a prompt and writes an answer works. The prompt goes on stdin
-    unless the argv contains the {prompt} placeholder.
+    `opencode run "<prompt>" --model provider/model` is the motivating case, but anything
+    that reads a prompt and writes an answer works. The prompt goes on stdin unless the
+    argv contains the {prompt} placeholder.
+
+    The child runs in an empty directory, never the user's. Several of the tools people
+    point this at are coding agents that read whatever project they are started in — which
+    is both slow (opencode spends minutes exploring a repo before answering) and the wrong
+    blast radius for a prompt assembled from an untrusted page.
     """
 
     PLACEHOLDER = "{prompt}"
@@ -121,21 +142,41 @@ class CommandProvider:
         prompt = f"{system}\n\n{user}"
         argv = [a.replace(self.PLACEHOLDER, prompt) for a in self.argv]
         stdin = None if any(self.PLACEHOLDER in a for a in self.argv) else prompt
+        with tempfile.TemporaryDirectory(
+            prefix="uparse-assist-", ignore_cleanup_errors=True
+        ) as neutral:
+            code, out, err = self._run(argv, stdin, cwd=neutral)
+        if code != 0:
+            raise AssistError(f"{self.name}: exit {code} {(err or out).strip()[:200]}")
+        return out
+
+    def _run(self, argv: list[str], stdin: str | None, *, cwd: str) -> tuple[int, str, str]:
+        """Own process group, and kill the group on timeout.
+
+        Killing the child alone leaves its children running: several of the tools people
+        point this at start a server and talk to it, and on timeout that server outlives
+        the run. Anything a user can start in a terminal is allowed here, so the timeout
+        has to apply to the whole subtree rather than to the process we happened to spawn.
+        """
         try:
-            done = subprocess.run(
+            child = subprocess.Popen(
                 argv,
-                input=stdin,
-                capture_output=True,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                timeout=self.timeout_s,
-                check=False,
+                cwd=cwd,
+                start_new_session=True,
             )
-        except (OSError, subprocess.TimeoutExpired) as exc:
+        except OSError as exc:
             raise AssistError(f"{self.name}: {exc}") from exc
-        if done.returncode != 0:
-            detail = (done.stderr or done.stdout or "").strip()[:200]
-            raise AssistError(f"{self.name}: exit {done.returncode} {detail}")
-        return done.stdout
+
+        try:
+            out, err = child.communicate(input=stdin, timeout=self.timeout_s)
+        except subprocess.TimeoutExpired as exc:
+            _kill_group(child)
+            raise AssistError(f"{self.name}: no answer within {self.timeout_s:.0f}s") from exc
+        return child.returncode, out, err
 
 
 class AnthropicProvider:
@@ -181,6 +222,29 @@ def build(config: AssistConfig) -> Provider:
             return AnthropicProvider(config)
         case _:
             return NullProvider()
+
+
+def _kill_group(child: subprocess.Popen[str]) -> None:
+    """Take the grandchildren with it, then stop touching the pipes."""
+    try:
+        os.killpg(os.getpgid(child.pid), signal.SIGKILL)
+    except OSError, ProcessLookupError:  # already gone, or no process groups here
+        child.kill()
+    for pipe in (child.stdin, child.stdout, child.stderr):
+        if pipe is not None:
+            pipe.close()
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        child.wait(timeout=5)
+
+
+def _retry_after(response: httpx.Response, attempt: int) -> float:
+    """The provider's own number when it gives one, else exponential. Always capped."""
+    header = response.headers.get("retry-after", "")
+    try:
+        wanted = float(header)
+    except ValueError:
+        wanted = float(2**attempt)
+    return max(0.0, min(wanted, MAX_BACKOFF_S))
 
 
 def _key_from_env(name: str | None) -> str:

@@ -40,10 +40,20 @@ obviously useful. Report as JSON."""
 USER_NO_INTENT = """Name the useful columns below. Include the ones a person scraping this \
 page would most likely want, and leave out interface text. Report as JSON."""
 
+REPAIR = """Your previous answer was not JSON I could read.
+
+<previous>
+{answer}
+</previous>
+
+Send the JSON object on its own: no prose before it, no code fence, no text after it."""
+
+# Strict JSON-schema modes require every property to be listed in `required`, so an
+# optional field is spelled as one that may be null rather than one that may be absent.
 SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["fields"],
+    "required": ["collection", "fields", "drop", "notes"],
     "properties": {
         "collection": {
             "type": ["string", "null"],
@@ -51,14 +61,18 @@ SCHEMA: dict[str, Any] = {
         },
         "fields": {
             "type": "array",
+            "description": "one entry per field worth extracting",
             "items": {
                 "type": "object",
                 "additionalProperties": False,
-                "required": ["name", "column"],
+                "required": ["name", "column", "why"],
                 "properties": {
                     "name": {"type": "string", "description": "lower_snake_case field name"},
                     "column": {"type": "string", "description": "column id from the report"},
-                    "why": {"type": "string", "description": "at most one short sentence"},
+                    "why": {
+                        "type": ["string", "null"],
+                        "description": "at most one short sentence",
+                    },
                 },
             },
         },
@@ -67,7 +81,7 @@ SCHEMA: dict[str, Any] = {
             "items": {"type": "string"},
             "description": "ids of columns that are interface text, not data",
         },
-        "notes": {"type": "string"},
+        "notes": {"type": ["string", "null"]},
     },
 }
 
@@ -79,6 +93,11 @@ def system() -> str:
 def user(brief: PageBrief, want: str | None) -> str:
     head = USER_WITH_INTENT.format(want=want) if want else USER_NO_INTENT
     return f"{head}\n\n<report>\n{brief.to_json(indent=2)}\n</report>"
+
+
+def repair(answer: str, limit: int = 1200) -> str:
+    """The single retry a tier TEXT provider gets. Its own answer back, and nothing else."""
+    return REPAIR.format(answer=answer.strip()[:limit])
 
 
 def default_want() -> str:

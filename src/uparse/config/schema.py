@@ -71,8 +71,12 @@ class BrowserConfig(Base):
 class FieldSpec(Base):
     """`"auto"` in JSONC widens to FieldSpec(mode='auto'); an object pins the extraction."""
 
-    mode: Literal["auto", "selector", "attribute", "regex", "constant"] = "auto"
+    mode: Literal["auto", "selector", "attribute", "regex", "constant", "field"] = "auto"
     selector: str | None = None
+    # `{"name": {"field": "title"}}` — what the engine already extracted, under another
+    # name. A pinned selector would re-read the DOM and lose everything the engine does to
+    # a value on the way out: ellipsis recovery, absolutization, coercion.
+    field: str | None = None
     attribute: str | None = None
     regex: str | None = None
     value: Any = None
@@ -92,7 +96,9 @@ class FieldSpec(Base):
             return {"mode": "selector", "selector": data}
         if isinstance(data, dict) and "mode" not in data:
             data = dict(data)
-            if data.get("regex"):
+            if data.get("field"):
+                data["mode"] = "field"
+            elif data.get("regex"):
                 data["mode"] = "regex"
             elif data.get("attribute"):
                 data["mode"] = "attribute"
@@ -108,6 +114,8 @@ class FieldSpec(Base):
             raise ValueError("selector mode requires 'selector'")
         if self.mode == "attribute" and not (self.selector and self.attribute):
             raise ValueError("attribute mode requires 'selector' and 'attribute'")
+        if self.mode == "field" and not self.field:
+            raise ValueError("field mode requires 'field'")
         if self.mode == "regex" and not self.regex:
             raise ValueError("regex mode requires 'regex'")
         return self

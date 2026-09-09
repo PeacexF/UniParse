@@ -1,0 +1,14 @@
+{
+  "want": "title, url, category, description, published",
+  "note": "Class names are CSS-in-JS hashes. The engine names everything but the relative timestamp column, whose values are '7 hrs ago', '8 hrs ago'.",
+  "expect": {
+    "coverage": 0.75,
+    "fields": [
+      ["title", "headline"],
+      ["url", "link"],
+      ["description", "summary"],
+      ["published", "published_at", "time", "age", "timestamp"]
+    ],
+    "gap": [["published", "published_at", "time", "age", "timestamp"]]
+  }
+}

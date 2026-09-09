@@ -1,0 +1,15 @@
+{
+  "want": "title, price, stock, url",
+  "note": "No naming gap here: the engine already finds every field. What this page measures is restraint — two of its columns hold the button text 'Add to basket', and a model that names them has proposed a field that is not data.",
+  "expect": {
+    "coverage": 0.9,
+    "fields": [
+      "title",
+      "price",
+      "url",
+      ["availability", "stock", "in_stock"]
+    ],
+    "gap": [],
+    "absent_values": ["Add to basket"]
+  }
+}

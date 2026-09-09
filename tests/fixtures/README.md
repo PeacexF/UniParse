@@ -71,6 +71,41 @@ as a price. Those checks are what keep that from coming back.
 | `bbc_news_front` | CSS-in-JS throughout: only structure can name anything |
 | `github_trending` | utility classes plus a description that must survive naming |
 
+### `<page>.intent.json` — the assisted path
+
+A page may also carry an intent file, which states what a person asked for and what a
+generated config must therefore produce. It is scored by a separate, explicitly-invoked
+run, because it needs a model and a free-tier model is not deterministic:
+
+```bash
+make eval-assist ARGS="-c examples/assist.jsonc"
+```
+
+```jsonc
+{
+  "want": "title, url, domain, rank",              // what `uparse generate --want` is given
+  "note": "The engine names only title and url.",
+  "expect": {
+    "coverage": 0.75,                              // the bar, for the gate and the score alike
+    "fields": [                                    // names the generated config must carry
+      ["title", "headline"],                       // a list means any one of these will do
+      ["domain", "site", "source", "host"]
+    ],
+    "gap": [["domain", "site", "source", "host"]],  // the subset the engine cannot name alone
+    "absent_values": ["Add to basket"]              // no field may hold this interface text
+  }
+}
+```
+
+`gap` is the number that says whether the feature earns its place: those are the fields
+the deterministic engine does not produce, so recovering them is the whole point. The
+synonym lists are not generosity — a model answers in the words of the request, and
+demanding one exact string would score its vocabulary instead of its usefulness.
+
+`absent_values` measures restraint. `books_toscrape` has no gap at all; it is in the
+assisted set only because two of its columns hold the words "Add to basket", and a model
+that names them has proposed a field that is not data.
+
 ### Adding a page
 
 ```python
@@ -82,4 +117,5 @@ pathlib.Path("tests/corpus/my_page.html.gz").write_bytes(gzip.compress(html.enco
 
 Then write `my_page.json` by hand, from what the page *actually* contains — open it and
 check. Never generate expectations from current output: that enshrines today's bugs as
-tomorrow's contract.
+tomorrow's contract. The same rule applies twice over to `my_page.intent.json`: write down
+what a person would want from the page, not what a model happened to answer.

@@ -68,3 +68,42 @@ def test_url_attributes_come_back_absolute(attribute):
     spec = FieldSpec(mode="attribute", selector=selector, attribute=attribute)
     value = _run({"image": spec})[0].get("image")
     assert value.startswith("https://shop.test/")
+
+
+# --- renaming an inferred field -------------------------------------------
+
+
+def test_a_renamed_field_keeps_everything_the_engine_did_to_the_value():
+    """A rename carries the coerced number and the absolutized href. Pinning the selector
+    instead re-reads the DOM, and gets the raw page text back."""
+    renamed = _run({"cost": FieldSpec(field="price"), "link": FieldSpec(field="url")})[0]
+    assert renamed.get("cost") == 10.0
+    assert renamed.get("link") == "https://shop.test/p/1"
+
+    reread = _run({"cost": FieldSpec(selector="span.cost")})[0]
+    assert reread.get("cost") == "£10.00"
+
+
+def test_a_rename_is_a_rename_not_a_copy():
+    records = _run({"product_name": FieldSpec(field="title")})
+    assert records[0].get("product_name") == "Clipped One..."
+    assert records[0].get("title") is None
+
+
+def test_a_renamed_field_can_be_kept_under_both_names():
+    records = _run({"product_name": FieldSpec(field="title"), "title": FieldSpec(mode="auto")})
+    assert records[0].get("product_name") == records[0].get("title") == "Clipped One..."
+
+
+def test_renaming_something_the_engine_never_found_leaves_no_field():
+    records = _run({"colour": FieldSpec(field="not_a_field")})
+    assert all(r.get("colour") is None for r in records)
+
+
+def test_a_rename_needs_a_field_to_rename():
+    with pytest.raises(ValueError, match="field mode requires"):
+        FieldSpec(mode="field")
+
+
+def test_the_short_form_widens_to_a_rename():
+    assert FieldSpec.model_validate({"field": "title"}).mode == "field"

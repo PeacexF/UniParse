@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from dataclasses import field as dc_field
 from typing import Any
 
@@ -335,6 +335,8 @@ def _apply_config_fields(
     for name, spec in cfg.fields.items():
         if spec.mode == "auto":
             continue
+        if spec.mode == "field":
+            continue  # a rename moves a finished value, so it runs after _finalize
         for record in records:
             scope = record.node if record.node is not None else root
             value = _apply_spec(spec, scope, page, name)
@@ -357,6 +359,28 @@ def _apply_config_fields(
                     signals=[Signal("explicit configuration", 1.0, spec.mode)],
                 )
             )
+
+
+def _apply_renames(records: list[Record], cfg: ExtractionConfig) -> None:
+    """`{"name": {"field": "title"}}` — what the engine already produced, under another name.
+
+    It runs after `_finalize`, on the finished value: a renamed `price` is the coerced
+    51.77, a renamed `title` the un-clipped string recovered from `title=`. Re-reading the
+    DOM through a pinned selector would throw all of that away, and coercing here instead
+    would type the value by its new name, which is not what it is.
+    """
+    for name, spec in cfg.fields.items():
+        if spec.mode != "field":
+            continue
+        source = spec.field or ""
+        for record in records:
+            found = record.fields.get(source)
+            if found is None:
+                record.fields.pop(name, None)
+                continue
+            record.set(replace(found, name=name))
+            if source not in cfg.fields:  # a rename, unless the source is asked for too
+                record.fields.pop(source, None)
 
 
 def _apply_spec(spec: FieldSpec, scope: HtmlElement, page: PageModel, name: str = "") -> Any:
@@ -450,7 +474,7 @@ def _record_from_candidates(
 
 
 def _finalize(records: list[Record], page: PageModel, cfg: ExtractionConfig) -> None:
-    wanted = set(cfg.fields) if cfg.fields else None
+    wanted = _wanted(cfg)
     for record in records:
         for name in list(record.fields):
             if wanted is not None and name not in wanted:
@@ -464,6 +488,15 @@ def _finalize(records: list[Record], page: PageModel, cfg: ExtractionConfig) -> 
             fv.value, fv.type = value, actual
             if value in (None, ""):
                 del record.fields[name]
+    _apply_renames(records, cfg)
+
+
+def _wanted(cfg: ExtractionConfig) -> set[str] | None:
+    """A rename's source has to survive the cut, or there is nothing left to rename."""
+    if not cfg.fields:
+        return None
+    sources = {s.field for s in cfg.fields.values() if s.mode == "field" and s.field}
+    return set(cfg.fields) | sources
 
 
 def _schema(records: list[Record]) -> dict[str, tuple[ValueType, float]]:

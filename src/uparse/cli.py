@@ -236,6 +236,8 @@ def _generated_summary(result: Any, output: Path | None) -> None:
         )
     for item in result.verdict.rejected:
         console.print(f"    [fail]{item.name:<16}[/fail] rejected: {item.reason}")
+    for skipped in result.verdict.ignored:
+        console.print(f"    [muted]{skipped.column:<16} ignored as interface text[/muted]")
     if output:
         console.print()
         console.print(f"wrote [url]{output}[/url] — review it, then [muted]uparse {output}[/muted]")

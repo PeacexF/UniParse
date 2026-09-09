@@ -46,19 +46,7 @@ class Proposal:
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any]) -> Proposal:
-        fields = []
-        for raw in payload.get("fields") or []:
-            if not isinstance(raw, dict):
-                continue
-            name, column = raw.get("name"), raw.get("column")
-            if isinstance(name, str) and isinstance(column, str) and name and column:
-                fields.append(
-                    FieldProposal(
-                        name=name.strip(),
-                        column=column.strip(),
-                        why=str(raw.get("why") or "").strip(),
-                    )
-                )
+        fields = _fields(payload) or _flat_fields(payload)
         collection = payload.get("collection")
         return cls(
             fields=fields,
@@ -66,6 +54,53 @@ class Proposal:
             drop=[d for d in (payload.get("drop") or []) if isinstance(d, str)],
             notes=str(payload.get("notes") or "").strip(),
         )
+
+
+ID = re.compile(r"[cg][0-9]{1,3}")
+
+
+def _fields(payload: dict[str, Any]) -> list[FieldProposal]:
+    out: list[FieldProposal] = []
+    for raw in payload.get("fields") or []:
+        if not isinstance(raw, dict):
+            continue
+        name, column = raw.get("name"), raw.get("column")
+        if isinstance(name, str) and isinstance(column, str) and name and column:
+            out.append(
+                FieldProposal(
+                    name=name.strip(),
+                    column=column.strip(),
+                    why=str(raw.get("why") or "").strip(),
+                )
+            )
+    return out
+
+
+ID_KEYS = ("column", "column_id", "id", "col")
+
+
+def _flat_fields(payload: dict[str, Any]) -> list[FieldProposal]:
+    """`{"title": "c4"}` and `{"title": {"column_id": "c4"}}` — the shapes small models
+    reach for whatever the schema says.
+
+    Accepting them costs nothing: every id still has to exist in the brief and every
+    selector still has to survive the gate, so a wrong guess fails closed exactly as
+    before. Refusing them costs a page.
+    """
+    out: list[FieldProposal] = []
+    for name, value in payload.items():
+        column = _id_in(value)
+        if column:
+            out.append(FieldProposal(name=name.strip(), column=column))
+    return out
+
+
+def _id_in(value: Any) -> str:
+    if isinstance(value, dict):
+        value = next((value[k] for k in ID_KEYS if isinstance(value.get(k), str)), None)
+    if isinstance(value, str) and ID.fullmatch(value.strip()):
+        return value.strip()
+    return ""
 
 
 @runtime_checkable
