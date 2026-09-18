@@ -1,0 +1,13 @@
+{
+  "want": "title, url, date, topic",
+  "note": "One unnamed column holds a single lowercase topic word per card ('community', 'ai').",
+  "expect": {
+    "coverage": 0.7,
+    "fields": [
+      "title",
+      "url",
+      ["topic", "category", "tag", "section", "subject"]
+    ],
+    "gap": [["topic", "category", "tag", "section", "subject"]]
+  }
+}

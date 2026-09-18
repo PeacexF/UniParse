@@ -83,12 +83,13 @@ Chromium, via the Node worker. Ignored when `acquirer` resolves to `http` or `fi
 
 ### Field specs
 
-Four spellings, increasingly explicit:
+Five spellings, increasingly explicit:
 
 ```jsonc
 "fields": {
   "price": "auto",                                    // infer it
   "title": ".product-title",                          // shorthand for a selector
+  "name":  { "field": "title" },                      // what it inferred, under another name
   "sku":   { "selector": ".code", "attribute": "data-sku" },
   "stock": { "selector": ".qty", "type": "integer", "required": true }
 }
@@ -96,7 +97,8 @@ Four spellings, increasingly explicit:
 
 | key | | |
 |---|---|---|
-| `mode` | `auto` · `selector` · `attribute` · `regex` · `constant` | inferred from the other keys |
+| `mode` | `auto` · `selector` · `attribute` · `regex` · `constant` · `field` | inferred from the other keys |
+| `field` | the inferred field to take, under this name | |
 | `selector` | CSS, resolved **inside each record** | |
 | `attribute` | an attribute name, or the pseudo-attributes `text` / `html` | |
 | `regex` | first group, or whole match; searched in the record's text | |
@@ -118,6 +120,13 @@ URL (`url`, `image`), in which case it yields `href`/`src`. Override either way 
 ```
 
 `href`, `src`, `srcset` and `data-src` come back absolute.
+
+**Rename, don't re-read.** `{ "field": "price" }` takes the value the engine produced —
+the coerced `51.77`, the un-clipped title recovered from `title=`, the absolutized href.
+Pinning the same element with a selector instead reads the page again and gets `"£51.77"`
+and `"A Light in the ..."` back. It is a rename: the original name is gone unless you also
+ask for it (`"title": "auto"` alongside). This is what `uparse generate` writes whenever a
+model gives a new name to a column the engine already found.
 
 ## pagination
 
@@ -203,6 +212,31 @@ Only transient codes are retried. `BLOCKED`, `ROBOTS_DISALLOWED` and config erro
 | `csv_delimiter` | `","` | |
 | `columns` | `[]` | fix the CSV column order |
 
+## assist
+
+Read by `uparse generate` and by nothing else — no scraping path imports the package. A
+complete file with every provider is [examples/assist.jsonc](../examples/assist.jsonc).
+
+| key | default | |
+|---|---|---|
+| `provider` | `"null"` | `null` · `openai_compatible` · `command` · `anthropic` |
+| `model` | `"gemini-3-flash"` | |
+| `base_url` | – | required for `openai_compatible` |
+| `api_key_env` | – | the **name** of the env var holding the key, never the key |
+| `command` | `[]` | required for `command`; `{prompt}` is substituted, else stdin |
+| `tier` | `"json"` | `schema` · `json` · `text` — how structured the answer can be asked for |
+| `min_coverage` | `0.8` | share of records a proposed selector must resolve in |
+| `max_fields` | `24` | |
+| `cache` | `true` | proposals cached under `~/.cache/uparse/assist`, keyed by the report |
+| `timeout_s` | `60` | |
+
+`tier` is a statement about the provider, not a preference. Ask a server that cannot honour
+a JSON schema for one and it will ignore it or refuse; `text` parses the answer defensively
+and gets one repair retry. A `command` provider is always effectively `text`.
+
+The generated `job.jsonc` never contains an `assist` block. It is a plain deterministic
+config, and re-running it needs no model, no key and no network beyond the pages.
+
 ## top level
 
 | key | default | |
@@ -229,6 +263,7 @@ Everything below overrides the file.
 
 `uparse inspect URL` takes `--schema`, `--explain FIELD`, `--no-browser` and `-c`.
 `uparse retry job.db` takes `-o`, `-c` and `--no-browser`.
+`uparse generate URL` takes `--want "a, b, c"`, `-o`, `-c`, `--no-browser` and `--no-cache`.
 
 ---
 

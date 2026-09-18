@@ -58,6 +58,10 @@ test-all: browser ## Run everything, including browser integration tests
 eval: ## Score the extraction engine against the saved corpus: make eval ARGS=-v
 	$(RUN) python tools/eval.py $(ARGS)
 
+.PHONY: eval-assist
+eval-assist: ## Score the LLM-assisted path: make eval-assist ARGS="-c assist.jsonc"
+	$(RUN) python tools/eval.py --assist $(ARGS)
+
 .PHONY: cov
 cov: ## Test suite with coverage report
 	$(RUN) pytest -m "not browser" --cov --cov-report=term-missing

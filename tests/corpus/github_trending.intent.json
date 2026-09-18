@@ -1,0 +1,19 @@
+{
+  "want": "title, url, description, language, stars_today",
+  "note": "The engine finds title, url, image and description. Language and the daily star count sit in unnamed spans inside div.f6.color-fg-muted; 'Star' is button text and must not become a field.",
+  "expect": {
+    "coverage": 0.75,
+    "fields": [
+      ["title", "repository", "repo", "name"],
+      ["url", "link"],
+      "description",
+      ["language", "lang", "programming_language"],
+      ["stars_today", "stars", "star_count", "stars_gained"]
+    ],
+    "gap": [
+      ["language", "lang", "programming_language"],
+      ["stars_today", "stars", "star_count", "stars_gained"]
+    ],
+    "absent_values": ["Star"]
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "want": "title, url, domain, rank",
+  "note": "The engine names only title and url. The site the story points at ('github.com/argonautlabsai') and the position ('1.') are unnamed columns.",
+  "expect": {
+    "coverage": 0.75,
+    "fields": [
+      ["title", "headline"],
+      ["url", "link"],
+      ["domain", "site", "source", "source_site", "host", "hostname"],
+      ["rank", "position", "index", "number"]
+    ],
+    "gap": [
+      ["domain", "site", "source", "source_site", "host", "hostname"],
+      ["rank", "position", "index", "number"]
+    ]
+  }
+}

@@ -1,0 +1,61 @@
+// Configuration for `uparse generate` — the one command that can talk to a model.
+//
+//     uparse generate https://example.com/products -c examples/assist.jsonc \
+//       --want "name, price, stock" -o job.jsonc
+//
+// Nothing here affects `uparse scrape`. The job.jsonc that comes out carries no `assist`
+// block at all: it is a plain deterministic config that runs forever with no model.
+{
+  "assist": {
+    // Google's free tier, through its OpenAI-compatible endpoint. Flash-only and roughly
+    // 5-15 requests a minute, which is far more than one-call-per-site ever needs.
+    "provider": "openai_compatible",
+    "model": "gemini-3-flash",
+    "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+
+    // The NAME of the variable holding the key. Never the key.
+    "api_key_env": "GEMINI_API_KEY",
+
+    // How precisely this provider can be asked for structured output:
+    //   "schema" — native JSON-schema response format (Gemini, Anthropic, GPT-class)
+    //   "json"   — JSON mode only (many local servers)
+    //   "text"   — plain text; the answer is parsed defensively, with one repair retry
+    "tier": "schema",
+
+    // A proposed field is re-run against every record on the real page before it is
+    // written. Below this share of records it is dropped, and the file says why.
+    "min_coverage": 0.8,
+
+    // Proposals are cached on disk by a hash of the report, so re-running costs nothing.
+    "cache": true,
+    "timeout_s": 60
+  }
+
+  // Ollama or LM Studio — same driver, no key, and no schema support:
+  //
+  //   "assist": {
+  //     "provider": "openai_compatible",
+  //     "model": "qwen3:8b",
+  //     "base_url": "http://localhost:11434/v1",
+  //     "tier": "json"
+  //   }
+  //
+  // Anything you can already run and authenticate in a terminal. `{prompt}` is replaced
+  // with the prompt; without it the prompt goes on stdin. The child runs in an empty
+  // directory, so a coding agent points at nothing of yours:
+  //
+  //   "assist": {
+  //     "provider": "command",
+  //     "command": ["opencode", "run", "--pure", "--model", "opencode/big-pickle", "{prompt}"],
+  //     "tier": "text",
+  //     "timeout_s": 180
+  //   }
+  //
+  // The paid path, needing `pip install 'uniparse[llm]'`:
+  //
+  //   "assist": {
+  //     "provider": "anthropic",
+  //     "model": "claude-opus-5",
+  //     "api_key_env": "ANTHROPIC_API_KEY"
+  //   }
+}
