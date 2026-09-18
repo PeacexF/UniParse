@@ -47,3 +47,4 @@ htmlcov/
 *.db
 *.csv
 data/
+.env
